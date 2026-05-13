@@ -5,7 +5,6 @@ import { chatStore } from '@/store/chatStore';
 import { Button } from '@/components/ui/button';
 import { FileUploadButton } from './FileUploadButton';
 import { AttachedFilesList } from './AttachedFilesList';
-import { ResponseStyleSelector } from './ResponseStyleSelector';
 import { ProfileSwitcher } from './ProfileSwitcher';
 import type { AttachedFile, ResponseStyle } from '@/types/chat';
 
@@ -142,6 +141,8 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
               onFilesAccepted={addFiles}
               onError={setFileError}
               disabled={!activeConversationId}
+              responseStyle={responseStyle}
+              onResponseStyleChange={setResponseStyle}
             />
           </div>
 
@@ -169,13 +170,9 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
           )}
         </div>
 
-        {/* Response style selector */}
-        <div className="flex items-center justify-between px-1">
-          <ResponseStyleSelector value={responseStyle} onChange={setResponseStyle} />
-          <p className="text-[11px] text-muted-foreground">
-            Ctrl+Enter to send · Ctrl+P to switch profile
-          </p>
-        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Ctrl+Enter to send · Ctrl+P to switch profile
+        </p>
       </div>
     </div>
   );

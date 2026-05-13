@@ -3,7 +3,8 @@ import { FileUp, Plus } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { readFile } from '@tauri-apps/plugin-fs';
 import { Button } from '@/components/ui/button';
-import type { AttachedFile } from '@/types/chat';
+import { RESPONSE_STYLES } from '@/lib/responseStyles';
+import type { AttachedFile, ResponseStyle } from '@/types/chat';
 
 const ACCEPTED_EXTENSIONS = ['txt', 'md', 'pdf', 'docx', 'csv', 'json'];
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -12,12 +13,16 @@ interface FileUploadButtonProps {
   onFilesAccepted: (files: AttachedFile[]) => void;
   onError: (msg: string) => void;
   disabled?: boolean;
+  responseStyle: ResponseStyle | null;
+  onResponseStyleChange: (style: ResponseStyle | null) => void;
 }
 
 export function FileUploadButton({
   onFilesAccepted,
   onError,
   disabled,
+  responseStyle,
+  onResponseStyleChange,
 }: FileUploadButtonProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -87,14 +92,14 @@ export function FileUploadButton({
         variant="ghost"
         size="icon-sm"
         disabled={disabled}
-        title="Upload documents"
+        title="Upload documents or adjust style"
         className="shrink-0 text-muted-foreground hover:text-foreground"
       >
         <Plus className="h-4 w-4" />
       </Button>
 
       {menuOpen && (
-        <div className="absolute bottom-full left-0 z-50 mb-1.5 rounded-lg border border-border/60 bg-popover shadow-lg">
+        <div className="absolute bottom-full left-0 z-50 mb-1.5 rounded-lg border border-border/60 bg-popover shadow-lg p-2 space-y-2 min-w-max">
           <button
             type="button"
             title="Upload documents into this chat"
@@ -102,19 +107,48 @@ export function FileUploadButton({
               setMenuOpen(false);
               void openFilePicker();
             }}
-            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted w-full"
+            className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-foreground transition-colors hover:bg-muted w-full"
           >
-            <FileUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <FileUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <span>Upload</span>
           </button>
+
+          <div className="border-t border-border/50 pt-1.5">
+            <p className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+              Style
+            </p>
+            <div className="flex items-center gap-1 px-1">
+              {RESPONSE_STYLES.map((style) => {
+                const Icon = style.icon;
+                const isActive = responseStyle === style.id;
+                return (
+                  <button
+                    key={style.id}
+                    type="button"
+                    title={`${style.label}: ${style.description}`}
+                    onClick={() => {
+                      onResponseStyleChange(isActive ? null : style.id);
+                    }}
+                    className={`p-1 rounded transition-all ${
+                      isActive
+                        ? 'bg-primary/20 text-primary'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    }`}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <button
             type="button"
             title="Add-ons coming soon"
             disabled
-            className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground opacity-50 w-full cursor-not-allowed"
+            className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground opacity-50 w-full cursor-not-allowed border-t border-border/50 pt-2"
           >
-            <Plus className="h-4 w-4 shrink-0" />
+            <Plus className="h-3.5 w-3.5 shrink-0" />
             <span>Add-on</span>
           </button>
         </div>
@@ -122,4 +156,5 @@ export function FileUploadButton({
     </div>
   );
 }
+
 
