@@ -1,12 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
 import { chatStore, type Message, type MemoryChunk } from '@/store/chatStore';
 import { profileStore, getProfileApiKey } from '@/store/profileStore';
-import type { AttachedFile } from '@/types/chat';
+import type { AttachedFile, ResponseStyle } from '@/types/chat';
 
 const SIDECAR_URL = 'http://127.0.0.1:8765';
 
 interface UseChatReturn {
-  sendMessage: (content: string, files?: AttachedFile[]) => Promise<void>;
+  sendMessage: (content: string, files?: AttachedFile[], responseStyle?: ResponseStyle | null) => Promise<void>;
   stopGeneration: () => void;
   isStreaming: boolean;
   error: string | null;
@@ -46,7 +46,11 @@ export function useChat(): UseChatReturn {
   const isStreaming = chatStore((state) => state.isStreaming);
   const [error, setError] = useState<string | null>(null);
 
-  const sendMessage = useCallback(async (content: string, files: AttachedFile[] = []) => {
+  const sendMessage = useCallback(async (
+    content: string,
+    files: AttachedFile[] = [],
+    responseStyle: ResponseStyle | null = null
+  ) => {
     const state = chatStore.getState();
     const activeConversationId = state.activeConversationId;
     if (!activeConversationId) return;
@@ -113,10 +117,13 @@ export function useChat(): UseChatReturn {
         body: JSON.stringify({
           conversation_id: activeConversationId,
           message: messageText,
+          display_message: content,
           provider,
           api_key: apiKey,
           model,
           file_names: fileNames,
+          response_style: responseStyle ?? 'concise',
+          has_response_style: !!responseStyle,
         }),
         signal: abortControllerRef.current.signal,
       });

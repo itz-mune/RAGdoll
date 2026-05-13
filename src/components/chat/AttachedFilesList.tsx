@@ -33,9 +33,10 @@ function truncateName(name: string, max = 24): string {
 interface AttachedFilesListProps {
   files: AttachedFile[];
   onRemove: (id: string) => void;
+  onTogglePersistent?: (id: string) => void;
 }
 
-export function AttachedFilesList({ files, onRemove }: AttachedFilesListProps) {
+export function AttachedFilesList({ files, onRemove, onTogglePersistent }: AttachedFilesListProps) {
   if (files.length === 0) return null;
 
   return (
@@ -55,6 +56,20 @@ export function AttachedFilesList({ files, onRemove }: AttachedFilesListProps) {
               {truncateName(f.name)}
             </span>
             <span className="text-muted-foreground">{formatBytes(f.size)}</span>
+            {onTogglePersistent && (
+              <button
+                type="button"
+                onClick={() => onTogglePersistent(f.id)}
+                title={f.persistent ? 'Persistent: this document stays attached for future messages in this chat' : 'One-shot: this document is removed after your next message'}
+                aria-label={f.persistent ? `Disable persistence for ${f.name}` : `Keep ${f.name} attached for future messages`}
+                aria-pressed={!!f.persistent}
+                className={`ml-0.5 flex h-3.5 w-6 items-center rounded-full px-0.5 transition-colors ${
+                  f.persistent ? 'justify-end bg-primary/80' : 'justify-start bg-muted-foreground/25'
+                }`}
+              >
+                <span className="h-2.5 w-2.5 rounded-full bg-background shadow-sm" />
+              </button>
+            )}
             <button
               onClick={() => onRemove(f.id)}
               className="ml-0.5 text-muted-foreground/60 hover:text-foreground transition-colors"

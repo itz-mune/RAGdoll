@@ -126,3 +126,30 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
 }
+
+@keyframes ragdoll-caret-blink {
+  0%, 45% {
+    opacity: 1;
+  }
+  46%, 100% {
+    opacity: 0;
+  }
+}
+
+.streaming-markdown > p:last-child::after,
+.streaming-markdown > h1:last-child::after,
+.streaming-markdown > h2:last-child::after,
+.streaming-markdown > h3:last-child::after,
+.streaming-markdown > h4:last-child::after,
+.streaming-markdown > h5:last-child::after,
+.streaming-markdown > h6:last-child::after,
+.streaming-markdown li:last-child::after {
+  animation: ragdoll-caret-blink 1s steps(1, end) infinite;
+  background: currentColor;
+  content: "";
+  display: inline-block;
+  height: 1em;
+  margin-left: 0.18rem;
+  transform: translateY(0.15em);
+  width: 2px;
+}

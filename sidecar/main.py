@@ -73,10 +73,13 @@ class ConversationUpdate(BaseModel):
 class ChatStreamRequest(BaseModel):
     conversation_id: str
     message: str
+    display_message: Optional[str] = None
     provider: str
     api_key: Optional[str] = None
     model: Optional[str] = None
     file_names: List[str] = []
+    response_style: str = "normal"
+    has_response_style: bool = False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -435,10 +438,13 @@ async def chat_stream(request: ChatStreamRequest):
                 db=db,
                 conversation_id=request.conversation_id,
                 user_message=request.message,
+                display_message=request.display_message,
                 provider=request.provider,
                 api_key=request.api_key or "",
                 model=request.model,
                 file_names=request.file_names,
+                response_style=request.response_style,
+                has_response_style=request.has_response_style,
             ):
                 yield chunk
 
@@ -453,10 +459,13 @@ async def _stream_response(
     db: Session,
     conversation_id: str,
     user_message: str,
+    display_message: Optional[str],
     provider: str,
     api_key: str,
     model: Optional[str],
     file_names: List[str] = None,
+    response_style: str = "normal",
+    has_response_style: bool = False,
 ):
     """
     Core streaming generator.
@@ -495,6 +504,8 @@ async def _stream_response(
             conversation_id=conversation_id,
             role="user",
             content=user_message,
+            display_content=display_message if display_message is not None else user_message,
+            attached_file_names=json.dumps(file_names or []) if file_names else None,
             created_at=now,
         ))
         db.commit()
@@ -514,34 +525,40 @@ async def _stream_response(
 
         # 4. Build graph and stream tokens (lazy import keeps REST routes alive
         #    even if a provider package is missing)
-        from graph.agent import build_chat_graph
-        graph = build_chat_graph(provider, api_key, model)
-        initial_state = {"messages": lc_messages}
+        from graph.agent import build_chat_graph, get_style_contract
+        graph = build_chat_graph(provider, api_key, model, response_style, has_response_style)
+        initial_state = {
+            "messages": lc_messages,
+            "has_style": has_response_style,
+            "style": response_style,
+            "style_contract": get_style_contract(response_style),
+            "original_answer": "",
+            "styled_answer": "",
+            "final_answer": "",
+            "style_score": 0.0,
+            "style_feedback": "",
+            "style_iteration": 0,
+            "max_style_iterations": 5,
+        }
 
         full_content = ""
         assistant_msg_id = str(uuid.uuid4())
 
-        async for event in graph.astream_events(initial_state, version="v2"):
-            if event["event"] == "on_chat_model_stream":
-                chunk = event["data"]["chunk"]
-                raw = chunk.content if hasattr(chunk, "content") else ""
+        final_state = initial_state
+        async for state in graph.astream(initial_state, stream_mode="values"):
+            final_state = state
 
-                # Some providers (e.g. Anthropic with content-block delimiters)
-                # return content as a list of dicts instead of a plain string.
-                # Extract the text, skipping non-text blocks.
-                if isinstance(raw, list):
-                    content = "".join(
-                        block.get("text", "")
-                        for block in raw
-                        if isinstance(block, dict) and block.get("type") == "text"
-                    )
-                else:
-                    content = raw
+        full_content = final_state.get("final_answer", "")
+        if not full_content:
+            messages = final_state.get("messages", [])
+            if messages:
+                last = messages[-1]
+                raw = last.content if hasattr(last, "content") else ""
+                full_content = _message_content_to_text(raw)
 
-                if content:
-                    full_content += content
-                    yield _sse({"type": "chunk", "content": content})
-                    await asyncio.sleep(0)  # yield control to event loop
+        for content_chunk in _chunk_for_display(full_content):
+            yield _sse({"type": "chunk", "content": content_chunk})
+            await asyncio.sleep(0.015)
 
         # 5. Extract citations from response
         import re
@@ -594,6 +611,31 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
+def _message_content_to_text(raw) -> str:
+    if isinstance(raw, list):
+        return "".join(
+            block.get("text", "")
+            for block in raw
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return raw if isinstance(raw, str) else str(raw or "")
+
+
+def _chunk_for_display(text: str, target_size: int = 28):
+    """Emit validated text in small chunks so the UI still feels live."""
+    if not text:
+        return
+    start = 0
+    while start < len(text):
+        end = min(start + target_size, len(text))
+        if end < len(text):
+            boundary = max(text.rfind(" ", start, end), text.rfind("\n", start, end))
+            if boundary > start + 8:
+                end = boundary + 1
+        yield text[start:end]
+        start = end
+
+
 def _conv_dict(c: ConversationModel) -> dict:
     return {
         "id": c.id,
@@ -612,6 +654,8 @@ def _msg_dict(m: MessageModel) -> dict:
         "conversationId": m.conversation_id,
         "role": m.role,
         "content": m.content,
+        "displayContent": m.display_content,
+        "attachedFileNames": json.loads(m.attached_file_names) if m.attached_file_names else None,
         "createdAt": m.created_at,
         "isStreaming": False,
         "memoryChunks": json.loads(m.memory_chunks) if m.memory_chunks else None,

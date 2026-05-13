@@ -34,6 +34,8 @@ class MessageModel(SQLModel, table=True):
     created_at: int  # Unix timestamp ms
     memory_chunks: Optional[str] = Field(default=None)  # JSON string
     citations: Optional[str] = Field(default=None)       # JSON array string
+    display_content: Optional[str] = Field(default=None)
+    attached_file_names: Optional[str] = Field(default=None)  # JSON array string
 
 
 def init_db() -> None:
@@ -45,6 +47,8 @@ def init_db() -> None:
     with Session(engine) as session:
         for stmt in [
             "ALTER TABLE messages ADD COLUMN citations TEXT",
+            "ALTER TABLE messages ADD COLUMN display_content TEXT",
+            "ALTER TABLE messages ADD COLUMN attached_file_names TEXT",
         ]:
             try:
                 session.exec(text(stmt))

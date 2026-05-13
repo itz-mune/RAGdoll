@@ -1,21 +1,24 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
-import { chatStore, type MemoryChunk } from '@/store/chatStore';
+import { chatStore, type MemoryChunk, type Message } from '@/store/chatStore';
 
 interface ContextPanelProps {
   isOpen: boolean;
   onToggle: () => void;
 }
 
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_CHUNKS: MemoryChunk[] = [];
+
 export function ContextPanel({ isOpen, onToggle }: ContextPanelProps) {
   const activeConversationId = chatStore((state) => state.activeConversationId);
   const messages = chatStore((state) =>
-    activeConversationId ? (state.messages[activeConversationId] ?? []) : []
+    activeConversationId ? (state.messages[activeConversationId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES
   );
 
   // Show memory from the last assistant message that has chunks
   const lastAssistantMessage = [...messages].reverse().find((m) => m.role === 'assistant');
-  const chunks: MemoryChunk[] = lastAssistantMessage?.memoryChunks ?? [];
+  const chunks: MemoryChunk[] = lastAssistantMessage?.memoryChunks ?? EMPTY_CHUNKS;
 
   return (
     <motion.div

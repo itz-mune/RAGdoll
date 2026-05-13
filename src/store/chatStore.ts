@@ -16,6 +16,7 @@ export interface Message {
   conversationId: string;
   role: MessageRole;
   content: string;
+  displayContent?: string | null;
   createdAt: number;
   isStreaming: boolean;
   memoryChunks: MemoryChunk[] | null;

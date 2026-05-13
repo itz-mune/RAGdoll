@@ -17,10 +17,32 @@ const SUGGESTED_PROMPTS = [
   'Answer questions from my notes',
 ] as const;
 
+const EMPTY_MESSAGES: Message[] = [];
+const DOCUMENT_CONTEXT_PREFIX = 'The user has attached the following documents:';
+
+function getVisibleUserMessage(message: Message): { content: string; fileNames: string[] } {
+  const metadataFileNames = message.attachedFileNames ?? [];
+  const documentFileNames = Array.from(
+    message.content.matchAll(/\[document:\s*([^\]]+)\]/g),
+    (match) => match[1].trim()
+  );
+  const fileNames = metadataFileNames.length > 0 ? metadataFileNames : documentFileNames;
+
+  if (message.displayContent !== undefined && message.displayContent !== null) {
+    return { content: message.displayContent, fileNames };
+  }
+
+  if (message.content.trimStart().startsWith(DOCUMENT_CONTEXT_PREFIX)) {
+    return { content: '', fileNames };
+  }
+
+  return { content: message.content, fileNames };
+}
+
 export function MessageThread() {
   const activeConversationId = chatStore((state) => state.activeConversationId);
   const messages = chatStore((state) =>
-    activeConversationId ? (state.messages[activeConversationId] ?? []) : []
+    activeConversationId ? (state.messages[activeConversationId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES
   );
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -131,6 +153,9 @@ function MessageBubble({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
   const activeConversationId = chatStore((state) => state.activeConversationId);
+  const visibleUserMessage = isUser ? getVisibleUserMessage(message) : null;
+  const displayContent = visibleUserMessage?.content ?? message.content;
+  const attachedFileNames = visibleUserMessage?.fileNames ?? message.attachedFileNames ?? [];
 
   const handleCopy = async (text: string) => {
     await navigator.clipboard.writeText(text);
@@ -152,16 +177,17 @@ function MessageBubble({ message }: { message: Message }) {
     >
       <div
         className={cn(
-          'group relative max-w-[72%] rounded-xl px-4 py-3',
+          'group relative min-w-0 max-w-[72%] overflow-hidden rounded-xl px-4 py-3',
           isUser
             ? 'bg-primary text-primary-foreground'
             : 'border border-border/50 bg-muted/40 text-foreground'
         )}
       >
         {/* Markdown content */}
-        <div
-          className={cn(
-            'prose-sm max-w-none break-words text-sm leading-relaxed',
+        {displayContent && (
+          <div
+            className={cn(
+            'message-markdown prose-sm max-w-full min-w-0 overflow-hidden break-words text-sm leading-relaxed [overflow-wrap:anywhere]',
             '[&_p]:mb-2 [&_p:last-child]:mb-0',
             '[&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-4',
             '[&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-4',
@@ -174,56 +200,66 @@ function MessageBubble({ message }: { message: Message }) {
             '[&_th]:border [&_th]:border-current/20 [&_th]:bg-current/5 [&_th]:p-1.5 [&_th]:text-left',
             '[&_td]:border [&_td]:border-current/20 [&_td]:p-1.5',
             '[&_hr]:border-current/20 [&_hr]:my-3',
+            '[&_pre]:max-w-full [&_pre]:overflow-x-auto',
+            '[&_code]:break-words [&_code]:[overflow-wrap:anywhere]',
+            '[&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto',
+            message.isStreaming && displayContent && 'streaming-markdown',
             isUser ? 'text-primary-foreground' : 'text-foreground'
-          )}
-        >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              // v9-compatible code renderer — no `inline` prop
-              code({ className, children, ...props }) {
-                const match = /language-(\w+)/.exec(className ?? '');
-                if (match) {
-                  return (
-                    <SyntaxHighlighter
-                      style={vscDarkPlus}
-                      language={match[1]}
-                      PreTag="div"
-                      customStyle={{
-                        borderRadius: '0.5rem',
-                        fontSize: '0.75rem',
-                        margin: '0.5rem 0',
-                        padding: '0.75rem',
-                      }}
-                      {...(props as object)}
-                    >
-                      {String(children).replace(/\n$/, '')}
-                    </SyntaxHighlighter>
-                  );
-                }
-                return (
-                  <code
-                    className={cn(
-                      'rounded px-1 py-0.5 font-mono text-[0.8em]',
-                      isUser ? 'bg-primary-foreground/15' : 'bg-black/20',
-                      className
-                    )}
-                    {...props}
-                  >
-                    {children}
-                  </code>
-                );
-              },
-            }}
+            )}
           >
-            {message.content}
-          </ReactMarkdown>
-        </div>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // v9-compatible code renderer — no `inline` prop
+                code({ className, children, ...props }) {
+                  const match = /language-(\w+)/.exec(className ?? '');
+                  if (match) {
+                    return (
+                      <SyntaxHighlighter
+                        style={vscDarkPlus}
+                        language={match[1]}
+                        PreTag="div"
+                        wrapLongLines
+                        customStyle={{
+                          borderRadius: '0.5rem',
+                          fontSize: '0.75rem',
+                          margin: '0.5rem 0',
+                          maxWidth: '100%',
+                          overflowX: 'auto',
+                          padding: '0.75rem',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}
+                        {...(props as object)}
+                      >
+                        {String(children).replace(/\n$/, '')}
+                      </SyntaxHighlighter>
+                    );
+                  }
+                  return (
+                    <code
+                      className={cn(
+                        'rounded px-1 py-0.5 font-mono text-[0.8em] break-words [overflow-wrap:anywhere]',
+                        isUser ? 'bg-primary-foreground/15' : 'bg-black/20',
+                        className
+                      )}
+                      {...props}
+                    >
+                      {children}
+                    </code>
+                  );
+                },
+              }}
+            >
+              {displayContent}
+            </ReactMarkdown>
+          </div>
+        )}
 
         {/* Attached files (user messages) */}
-        {isUser && message.attachedFileNames && message.attachedFileNames.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1 border-t border-primary-foreground/20 pt-2">
-            {message.attachedFileNames.map((name) => (
+        {isUser && attachedFileNames.length > 0 && (
+          <div className={cn('flex flex-wrap gap-1', displayContent && 'mt-2 border-t border-primary-foreground/20 pt-2')}>
+            {attachedFileNames.map((name) => (
               <span
                 key={name}
                 className="flex items-center gap-1 rounded-full bg-primary-foreground/15 px-2 py-0.5 text-[10px] font-medium"
@@ -243,10 +279,6 @@ function MessageBubble({ message }: { message: Message }) {
             <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:300ms]" />
           </span>
         )}
-        {/* Blinking cursor once text has started */}
-        {message.isStreaming && message.content && (
-          <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse bg-current align-middle" />
-        )}
 
         {/* Assistant toolbar (visible on hover) */}
         {!isUser && !message.isStreaming && (
@@ -254,7 +286,7 @@ function MessageBubble({ message }: { message: Message }) {
             <Button
               variant="ghost"
               size="xs"
-              onClick={() => handleCopy(message.content)}
+              onClick={() => handleCopy(displayContent)}
               className="h-6 gap-1 px-1.5 text-[11px]"
             >
               {copied ? (

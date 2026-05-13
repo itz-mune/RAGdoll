@@ -5,8 +5,9 @@ import { chatStore } from '@/store/chatStore';
 import { Button } from '@/components/ui/button';
 import { FileUploadButton } from './FileUploadButton';
 import { AttachedFilesList } from './AttachedFilesList';
+import { ResponseStyleSelector } from './ResponseStyleSelector';
 import { ProfileSwitcher } from './ProfileSwitcher';
-import type { AttachedFile } from '@/types/chat';
+import type { AttachedFile, ResponseStyle } from '@/types/chat';
 
 interface ChatInputProps {
   onNavigateToSettings?: () => void;
@@ -17,22 +18,33 @@ interface ChatInputProps {
 
 export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesConsumed }: ChatInputProps) {
   const [input, setInput] = useState('');
-  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [responseStyle, setResponseStyle] = useState<ResponseStyle | null>(null);
+  const [attachedFilesByConversation, setAttachedFilesByConversation] = useState<Record<string, AttachedFile[]>>({});
   const [fileError, setFileError] = useState<string | null>(null);
+  const { sendMessage, stopGeneration, isStreaming } = useChat();
+  const activeConversationId = chatStore((state) => state.activeConversationId);
+  const attachedFiles = activeConversationId ? (attachedFilesByConversation[activeConversationId] ?? []) : [];
+
+  const updateAttachedFiles = (
+    updater: (files: AttachedFile[]) => AttachedFile[]
+  ) => {
+    if (!activeConversationId) return;
+    setAttachedFilesByConversation((prev) => ({
+      ...prev,
+      [activeConversationId]: updater(prev[activeConversationId] ?? []),
+    }));
+  };
 
   // Merge externally-dropped files (from DragDropZone) into the local queue
   useEffect(() => {
-    if (!droppedFiles || droppedFiles.length === 0) return;
-    setAttachedFiles((prev) => {
+    if (!activeConversationId || !droppedFiles || droppedFiles.length === 0) return;
+    updateAttachedFiles((prev) => {
       const existingNames = new Set(prev.map((f) => f.name));
       return [...prev, ...droppedFiles.filter((f) => !existingNames.has(f.name))];
     });
     onDroppedFilesConsumed?.();
-  }, [droppedFiles, onDroppedFilesConsumed]);
+  }, [activeConversationId, droppedFiles, onDroppedFilesConsumed]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const { sendMessage, stopGeneration, isStreaming } = useChat();
-  const activeConversationId = chatStore((state) => state.activeConversationId);
 
   // Auto-expand textarea
   useEffect(() => {
@@ -65,8 +77,8 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
     const content = input;
     const files = attachedFiles;
     setInput('');
-    // Files persist as session context — only removed when the user clicks X on a chip
-    await sendMessage(content, files);
+    await sendMessage(content, files, responseStyle);
+    updateAttachedFiles((prev) => prev.filter((file) => file.persistent));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -79,13 +91,17 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
   };
 
   const addFiles = (files: AttachedFile[]) => {
-    setAttachedFiles((prev) => {
+    updateAttachedFiles((prev) => {
       const existingNames = new Set(prev.map((f) => f.name));
       return [...prev, ...files.filter((f) => !existingNames.has(f.name))];
     });
   };
 
-  const removeFile = (id: string) => setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
+  const removeFile = (id: string) => updateAttachedFiles((prev) => prev.filter((f) => f.id !== id));
+  const togglePersistent = (id: string) =>
+    updateAttachedFiles((prev) =>
+      prev.map((f) => (f.id === id ? { ...f, persistent: !f.persistent } : f))
+    );
 
   const canSend = (input.trim().length > 0 || attachedFiles.length > 0) && !isStreaming && !!activeConversationId;
 
@@ -102,9 +118,13 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
           <div className="rounded-lg border border-border/40 bg-muted/30 px-3 pt-2 pb-1">
             <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               <Paperclip className="h-2.5 w-2.5" />
-              Context documents · included in every message
+              Context documents
             </div>
-            <AttachedFilesList files={attachedFiles} onRemove={removeFile} />
+            <AttachedFilesList
+              files={attachedFiles}
+              onRemove={removeFile}
+              onTogglePersistent={togglePersistent}
+            />
           </div>
         )}
 
@@ -149,9 +169,13 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
           )}
         </div>
 
-        <p className="text-[11px] text-muted-foreground">
-          Ctrl+Enter to send · Ctrl+P to switch profile · Drag files to attach
-        </p>
+        {/* Response style selector */}
+        <div className="flex items-center justify-between px-1">
+          <ResponseStyleSelector value={responseStyle} onChange={setResponseStyle} />
+          <p className="text-[11px] text-muted-foreground">
+            Ctrl+Enter to send · Ctrl+P to switch profile
+          </p>
+        </div>
       </div>
     </div>
   );
