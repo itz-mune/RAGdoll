@@ -1,0 +1,40 @@
+# Python / uv
+sidecar/.venv/
+sidecar/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+
+# Tauri build output
+src-tauri/target/
+
+# Env files
+.env
+.env.local
+
+# LanceDB vector data
+sidecar/memory/data/
+sidecar/*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local/editor config
+.vscode/
+.claude/
+.mcp.json
+mcp.json
+
+# Community plugin repos live separately
+plugins/
+sidecar/plugins/
+
+# Local notes
+INSTALLATION_COMMANDS.md
+PROVIDER_EXTENSION_SUMMARY.md
+tailwindd.cconfig.js
+tsconfig.js

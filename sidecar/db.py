@@ -1,0 +1,59 @@
+"""SQLite database setup using SQLModel for RAGdoll chat."""
+from typing import Optional
+
+from sqlmodel import SQLModel, Field, Session, create_engine
+
+
+DATABASE_URL = "sqlite:///./ragdoll_chat.db"
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
+
+class ConversationModel(SQLModel, table=True):
+    """Conversation database model."""
+
+    __tablename__ = "conversations"  # type: ignore[assignment]
+
+    id: str = Field(primary_key=True)
+    title: str
+    provider: str
+    model: str
+    created_at: int  # Unix timestamp ms
+    updated_at: int  # Unix timestamp ms
+    message_count: int = 0
+
+
+class MessageModel(SQLModel, table=True):
+    """Message database model."""
+
+    __tablename__ = "messages"  # type: ignore[assignment]
+
+    id: str = Field(primary_key=True)
+    conversation_id: str = Field(foreign_key="conversations.id")
+    role: str  # 'user' | 'assistant' | 'system'
+    content: str
+    created_at: int  # Unix timestamp ms
+    memory_chunks: Optional[str] = Field(default=None)  # JSON string
+    citations: Optional[str] = Field(default=None)       # JSON array string
+
+
+def init_db() -> None:
+    """Create all tables on startup if they don't exist."""
+    SQLModel.metadata.create_all(engine)
+
+    # Safe schema migrations — try to add new columns; ignore if already present.
+    from sqlalchemy import text
+    with Session(engine) as session:
+        for stmt in [
+            "ALTER TABLE messages ADD COLUMN citations TEXT",
+        ]:
+            try:
+                session.exec(text(stmt))
+                session.commit()
+            except Exception:
+                pass  # column already exists
+
+
+def get_db():
+    """FastAPI dependency — yields a SQLModel Session."""
+    with Session(engine) as session:
+        yield session
