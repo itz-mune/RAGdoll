@@ -29,9 +29,8 @@ Thumbs.db
 .mcp.json
 mcp.json
 
-# Community plugin repos live separately
-plugins/
-sidecar/plugins/
+# Community plugin repos live separately (root-level only, not sidecar/plugins/)
+/plugins/
 
 # Separate plugins repo (own git repo — pushed independently)
 plugins-repo/

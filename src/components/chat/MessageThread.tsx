@@ -333,10 +333,13 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
           </div>
         )}
 
-        {/* Typing indicator — skill name or dots before any text arrives */}
+        {/* Typing indicator — installing/using skill or plain dots before any text arrives */}
         {message.isStreaming && !message.content && (
-          hasToolCalls ? (
-            <SkillLoadingIndicator tools={message.toolCallsUsed!} />
+          hasToolCalls || message.installingPlugin ? (
+            <SkillLoadingIndicator
+              tools={message.toolCallsUsed ?? []}
+              installingPlugin={message.installingPlugin}
+            />
           ) : (
             <span className="flex items-center gap-1 py-1">
               <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:0ms]" />

@@ -26,6 +26,7 @@ export interface Message {
   thinkingContent?: string | null;
   thinkingDuration?: number | null;   // seconds
   toolCallsUsed?: string[];           // tool names used to produce this message
+  installingPlugin?: { name: string; id: string } | null; // set while a plugin is being installed
 }
 
 export interface Conversation {
@@ -63,6 +64,7 @@ interface ChatStore {
   setThinkingContent: (messageId: string, content: string) => void;
   finalizeThinking: (messageId: string, durationSeconds: number) => void;
   setToolCallsUsed: (messageId: string, tools: string[]) => void;
+  setInstallingPlugin: (messageId: string, plugin: { name: string; id: string } | null) => void;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -218,6 +220,20 @@ export const useChatStore = create<ChatStore>()(
             ...state.messages,
             [activeConvId]: (state.messages[activeConvId] ?? []).map((msg) =>
               msg.id === messageId ? { ...msg, toolCallsUsed: tools } : msg
+            ),
+          },
+        };
+      }),
+
+    setInstallingPlugin: (messageId, plugin) =>
+      set((state) => {
+        const activeConvId = state.activeConversationId;
+        if (!activeConvId) return state;
+        return {
+          messages: {
+            ...state.messages,
+            [activeConvId]: (state.messages[activeConvId] ?? []).map((msg) =>
+              msg.id === messageId ? { ...msg, installingPlugin: plugin } : msg
             ),
           },
         };

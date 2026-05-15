@@ -165,6 +165,11 @@ export function useChat(): UseChatReturn {
 
             if (event.type === 'tool_use') {
               chatStore.getState().setToolCallsUsed(streamingMessageId, event.tools ?? []);
+            } else if (event.type === 'plugin_install') {
+              chatStore.getState().setInstallingPlugin(streamingMessageId, {
+                name: event.plugin_name ?? event.plugin_id ?? 'Plugin',
+                id: event.plugin_id ?? '',
+              });
             } else if (event.type === 'chunk') {
               chatStore.getState().appendToStreamingMessage(streamingMessageId, event.content ?? '');
             } else if (event.type === 'thinking') {

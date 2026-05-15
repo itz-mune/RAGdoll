@@ -22,9 +22,26 @@ export function toolDisplay(name: string): { label: string; icon: string } {
 
 interface SkillLoadingIndicatorProps {
   tools: string[];
+  installingPlugin?: { name: string; id: string } | null;
 }
 
-export function SkillLoadingIndicator({ tools }: SkillLoadingIndicatorProps) {
+export function SkillLoadingIndicator({ tools, installingPlugin }: SkillLoadingIndicatorProps) {
+  // Installing state — amber gradient, takes priority over "Using…"
+  if (installingPlugin) {
+    return (
+      <span
+        className={cn(
+          'inline-block py-1 text-[12px] font-medium',
+          'animate-tool-shimmer bg-[length:200%_100%] bg-gradient-to-r',
+          'from-amber-400/60 via-amber-500 to-amber-400/60',
+          'bg-clip-text text-transparent',
+        )}
+      >
+        📦 Installing {installingPlugin.name}…
+      </span>
+    );
+  }
+
   if (!tools || tools.length === 0) return null;
 
   // Show first tool name; if multiple, append count

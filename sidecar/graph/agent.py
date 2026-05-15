@@ -323,6 +323,12 @@ async def _run_tool_loop(
             result = f"Tool {tool_name!r} not found."
             try:
                 from plugins.loader import get_enabled_skills
+                # Attach the SSE queue to the event bus so tools can emit mid-stream events
+                try:
+                    from plugins.events import set_event_queue
+                    set_event_queue(event_queue)
+                except ImportError:
+                    pass
                 for skill in get_enabled_skills():
                     if getattr(skill, "name", None) == tool_name:
                         result = skill.invoke(tool_args)
