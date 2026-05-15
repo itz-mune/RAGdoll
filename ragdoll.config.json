@@ -12,6 +12,7 @@
     "github_api_base": "https://api.github.com/repos/itz-mune/RAGdoll-plugins",
     "raw_base": "https://raw.githubusercontent.com/itz-mune/RAGdoll-plugins/main",
     "preinstalled": [
+      "skill-finder",
       "web-search",
       "image-viewer",
       "url-fetcher",
