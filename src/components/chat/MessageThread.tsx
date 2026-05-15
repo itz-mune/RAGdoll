@@ -54,14 +54,38 @@ export function MessageThread() {
   // → setIsAtBottom → effect re-fires → scroll again → repeat.
   const isAtBottomRef = useRef(true);
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const prevConversationIdRef = useRef<string | null>(null);
+  // Set to true whenever the conversation changes; cleared once messages arrive
+  // and we've done the instant jump. Handles the case where the conversation ID
+  // is restored before messages have loaded (e.g. on app restart).
+  const pendingInstantScrollRef = useRef(true);
   const { sendMessage } = useChat();
 
-  // Auto-scroll only when messages change; read position from ref, not state.
+  // Conversation switch → instant jump to bottom (no visible scroll animation).
+  // New message during streaming → smooth scroll only if already near bottom.
   useEffect(() => {
-    if (isAtBottomRef.current) {
+    const conversationChanged = prevConversationIdRef.current !== activeConversationId;
+    prevConversationIdRef.current = activeConversationId ?? null;
+
+    if (conversationChanged) {
+      // Mark that we need an instant jump; defer until messages are actually there.
+      pendingInstantScrollRef.current = true;
+    }
+
+    if (pendingInstantScrollRef.current) {
+      if (messages.length > 0) {
+        // Messages have arrived — jump instantly, no animation.
+        bottomRef.current?.scrollIntoView({ behavior: 'instant' });
+        isAtBottomRef.current = true;
+        setIsAtBottom(true);
+        pendingInstantScrollRef.current = false;
+      }
+      // else: still waiting for messages to load, do nothing yet.
+    } else if (isAtBottomRef.current) {
+      // Normal streaming update — smooth scroll only when pinned to bottom.
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [messages, activeConversationId]);
 
   const handleScroll = () => {
     if (!containerRef.current) return;
