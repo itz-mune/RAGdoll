@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Puzzle, Palette, Zap, Check, Blocks } from 'lucide-react';
+import { Puzzle, Palette, Zap, Check, Blocks, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const SIDECAR_URL = 'http://127.0.0.1:8765';
@@ -12,6 +12,7 @@ interface InstalledPlugin {
   icon: string;
   category: 'skill' | 'style' | 'addon';
   is_enabled: boolean;
+  is_preinstalled: boolean;
 }
 
 interface PluginsResponse {
@@ -26,6 +27,7 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
   const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
   const [activeStyle, setActiveStyle] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click
@@ -79,6 +81,16 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
     } else {
       await fetch(`${SIDECAR_URL}/plugins/style/${pluginId}/activate`, { method: 'POST' });
       setActiveStyle(pluginId);
+    }
+  };
+
+  const uninstallPlugin = async (plugin: InstalledPlugin) => {
+    await fetch(`${SIDECAR_URL}/plugins/${plugin.id}/uninstall`, { method: 'POST' });
+    setPlugins((prev) => prev.filter((p) => p.id !== plugin.id));
+    setConfirmUninstall(null);
+    // Clear active style if we just uninstalled it
+    if (plugin.category === 'style' && activeStyle === plugin.id) {
+      setActiveStyle(null);
     }
   };
 
@@ -145,30 +157,38 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
                   </div>
                   <div className="mt-0.5 space-y-0.5">
                     {skills.map((plugin) => (
-                      <button
-                        key={plugin.id}
-                        onClick={() => toggleSkill(plugin)}
-                        className={cn(
-                          'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors',
-                          plugin.is_enabled
-                            ? 'bg-primary/8 text-foreground'
-                            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                      <div key={plugin.id} className="group relative flex items-center gap-1">
+                        {confirmUninstall === plugin.id ? (
+                          <div className="flex w-full items-center gap-1.5 rounded-lg bg-destructive/10 px-2 py-1.5">
+                            <span className="flex-1 text-xs text-destructive">Remove {plugin.name}?</span>
+                            <button onClick={() => uninstallPlugin(plugin)} className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-destructive hover:bg-destructive/20">Yes</button>
+                            <button onClick={() => setConfirmUninstall(null)} className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted">No</button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => toggleSkill(plugin)}
+                              className={cn(
+                                'flex flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors',
+                                plugin.is_enabled
+                                  ? 'bg-primary/8 text-foreground'
+                                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                              )}
+                            >
+                              <span className="text-base leading-none">{plugin.icon}</span>
+                              <span className="flex-1 text-xs font-medium">{plugin.name}</span>
+                              <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors', plugin.is_enabled ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background')}>
+                                {plugin.is_enabled && <Check className="h-2.5 w-2.5" />}
+                              </span>
+                            </button>
+                            {!plugin.is_preinstalled && (
+                              <button onClick={() => setConfirmUninstall(plugin.id)} className="shrink-0 rounded p-1 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/50 hover:!text-destructive hover:bg-destructive/10">
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            )}
+                          </>
                         )}
-                      >
-                        <span className="text-base leading-none">{plugin.icon}</span>
-                        <span className="flex-1 text-xs font-medium">{plugin.name}</span>
-                        {/* Checkbox indicator */}
-                        <span
-                          className={cn(
-                            'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
-                            plugin.is_enabled
-                              ? 'border-primary bg-primary text-primary-foreground'
-                              : 'border-border bg-background',
-                          )}
-                        >
-                          {plugin.is_enabled && <Check className="h-2.5 w-2.5" />}
-                        </span>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -209,30 +229,36 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
                     {styles.map((plugin) => {
                       const isActive = activeStyle === plugin.id;
                       return (
-                        <button
-                          key={plugin.id}
-                          onClick={() => selectStyle(plugin.id)}
-                          className={cn(
-                            'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors',
-                            isActive
-                              ? 'bg-purple-500/10 text-foreground'
-                              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                        <div key={plugin.id} className="group relative flex items-center gap-1">
+                          {confirmUninstall === plugin.id ? (
+                            <div className="flex w-full items-center gap-1.5 rounded-lg bg-destructive/10 px-2 py-1.5">
+                              <span className="flex-1 text-xs text-destructive">Remove {plugin.name}?</span>
+                              <button onClick={() => uninstallPlugin(plugin)} className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-destructive hover:bg-destructive/20">Yes</button>
+                              <button onClick={() => setConfirmUninstall(null)} className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted">No</button>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => selectStyle(plugin.id)}
+                                className={cn(
+                                  'flex flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors',
+                                  isActive ? 'bg-purple-500/10 text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                                )}
+                              >
+                                <span className="text-base leading-none">{plugin.icon}</span>
+                                <span className="flex-1 text-xs font-medium">{plugin.name}</span>
+                                <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors', isActive ? 'border-purple-500 bg-purple-500' : 'border-border bg-background')}>
+                                  {isActive && <Check className="h-2.5 w-2.5 text-white" />}
+                                </span>
+                              </button>
+                              {!plugin.is_preinstalled && (
+                                <button onClick={() => setConfirmUninstall(plugin.id)} className="shrink-0 rounded p-1 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/50 hover:!text-destructive hover:bg-destructive/10">
+                                  <Trash2 className="h-3 w-3" />
+                                </button>
+                              )}
+                            </>
                           )}
-                        >
-                          <span className="text-base leading-none">{plugin.icon}</span>
-                          <span className="flex-1 text-xs font-medium">{plugin.name}</span>
-                          {/* Radio indicator */}
-                          <span
-                            className={cn(
-                              'flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors',
-                              isActive
-                                ? 'border-purple-500 bg-purple-500'
-                                : 'border-border bg-background',
-                            )}
-                          >
-                            {isActive && <Check className="h-2.5 w-2.5 text-white" />}
-                          </span>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -253,29 +279,36 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
                   </div>
                   <div className="mt-0.5 space-y-0.5">
                     {addons.map((plugin) => (
-                      <button
-                        key={plugin.id}
-                        onClick={() => toggleSkill(plugin)}
-                        className={cn(
-                          'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors',
-                          plugin.is_enabled
-                            ? 'bg-green-500/8 text-foreground'
-                            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                      <div key={plugin.id} className="group relative flex items-center gap-1">
+                        {confirmUninstall === plugin.id ? (
+                          <div className="flex w-full items-center gap-1.5 rounded-lg bg-destructive/10 px-2 py-1.5">
+                            <span className="flex-1 text-xs text-destructive">Remove {plugin.name}?</span>
+                            <button onClick={() => uninstallPlugin(plugin)} className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-destructive hover:bg-destructive/20">Yes</button>
+                            <button onClick={() => setConfirmUninstall(null)} className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted">No</button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => toggleSkill(plugin)}
+                              className={cn(
+                                'flex flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors',
+                                plugin.is_enabled ? 'bg-green-500/8 text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                              )}
+                            >
+                              <span className="text-base leading-none">{plugin.icon}</span>
+                              <span className="flex-1 text-xs font-medium">{plugin.name}</span>
+                              <span className={cn('flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors', plugin.is_enabled ? 'border-green-500 bg-green-500 text-white' : 'border-border bg-background')}>
+                                {plugin.is_enabled && <Check className="h-2.5 w-2.5" />}
+                              </span>
+                            </button>
+                            {!plugin.is_preinstalled && (
+                              <button onClick={() => setConfirmUninstall(plugin.id)} className="shrink-0 rounded p-1 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/50 hover:!text-destructive hover:bg-destructive/10">
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            )}
+                          </>
                         )}
-                      >
-                        <span className="text-base leading-none">{plugin.icon}</span>
-                        <span className="flex-1 text-xs font-medium">{plugin.name}</span>
-                        <span
-                          className={cn(
-                            'flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
-                            plugin.is_enabled
-                              ? 'border-green-500 bg-green-500 text-white'
-                              : 'border-border bg-background',
-                          )}
-                        >
-                          {plugin.is_enabled && <Check className="h-2.5 w-2.5" />}
-                        </span>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 </div>

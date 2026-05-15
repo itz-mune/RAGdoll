@@ -71,6 +71,7 @@ export function MarketplacePage() {
           hasUpdate={marketplace.availableUpdates.has(detailPlugin.id)}
           onInstall={() => marketplace.installPlugin(detailPlugin)}
           onUpdate={() => marketplace.updatePlugin(detailPlugin)}
+          onUninstall={() => marketplace.uninstallPlugin(detailPlugin.id)}
           onBack={() => setDetailPlugin(null)}
         />
         {marketplace.installProgress && (

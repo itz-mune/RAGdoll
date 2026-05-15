@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Download, Check, Tag, ExternalLink, RefreshCcw } from 'lucide-react';
+import { ArrowLeft, Download, Check, Tag, ExternalLink, RefreshCcw, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { motion } from 'framer-motion';
@@ -16,6 +16,7 @@ interface PluginDetailPageProps {
   hasUpdate: boolean;
   onInstall: () => void;
   onUpdate: () => void;
+  onUninstall: () => void;
   onBack: () => void;
 }
 
@@ -25,9 +26,10 @@ const CATEGORY_COLORS: Record<string, string> = {
   addon:  'bg-green-500/15 text-green-400',
 };
 
-export function PluginDetailPage({ plugin, installed, installing, updating, hasUpdate, onInstall, onUpdate, onBack }: PluginDetailPageProps) {
+export function PluginDetailPage({ plugin, installed, installing, updating, hasUpdate, onInstall, onUpdate, onUninstall, onBack }: PluginDetailPageProps) {
   const [readme, setReadme] = useState<string | null>(null);
   const [readmeLoading, setReadmeLoading] = useState(true);
+  const [confirmUninstall, setConfirmUninstall] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +116,38 @@ export function PluginDetailPage({ plugin, installed, installing, updating, hasU
                   {installing ? 'Installing…' : 'Install'}
                 </Button>
               ) : null}
+
+              {/* Uninstall — only for non-preinstalled plugins */}
+              {isInstalled && !installed?.is_preinstalled && (
+                confirmUninstall ? (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground">Remove?</span>
+                    <Button
+                      size="sm" variant="destructive"
+                      className="gap-1 h-7 px-2 text-xs"
+                      onClick={() => { onUninstall(); onBack(); }}
+                    >
+                      <Trash2 className="h-3 w-3" /> Yes, remove
+                    </Button>
+                    <Button
+                      size="sm" variant="ghost"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setConfirmUninstall(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    size="sm" variant="ghost"
+                    className="gap-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setConfirmUninstall(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Uninstall
+                  </Button>
+                )
+              )}
             </div>
           </div>
 
