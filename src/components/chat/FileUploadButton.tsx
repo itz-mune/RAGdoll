@@ -142,15 +142,6 @@ export function FileUploadButton({
             </div>
           </div>
 
-          <button
-            type="button"
-            title="Add-ons coming soon"
-            disabled
-            className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground opacity-50 w-full cursor-not-allowed border-t border-border/50 pt-2"
-          >
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-            <span>Add-on</span>
-          </button>
         </div>
       )}
     </div>

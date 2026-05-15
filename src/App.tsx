@@ -44,6 +44,7 @@ export default function App() {
   const [setupComplete, setSetupComplete] = useState(false);
   const [checkingSetup, setCheckingSetup] = useState(true);
   const [view, setView] = useState<AppView>('chat');
+  const [openMemoryOnChat, setOpenMemoryOnChat] = useState(false);
 
   // ── Check for existing setup after sidecar is ready ──────────────────────
   useEffect(() => {
@@ -131,14 +132,21 @@ export default function App() {
   if (view === 'settings') {
     return (
       <ErrorBoundary>
-        <SettingsPage onBack={() => setView('chat')} />
+        <SettingsPage
+          onBack={() => setView('chat')}
+          onOpenMemoryBrowser={() => { setOpenMemoryOnChat(true); setView('chat'); }}
+        />
       </ErrorBoundary>
     );
   }
 
   return (
     <ErrorBoundary>
-      <AppShell onOpenSettings={() => setView('settings')} />
+      <AppShell
+        onOpenSettings={() => setView('settings')}
+        defaultMemoryBrowserOpen={openMemoryOnChat}
+        onMemoryBrowserOpened={() => setOpenMemoryOnChat(false)}
+      />
     </ErrorBoundary>
   );
 }

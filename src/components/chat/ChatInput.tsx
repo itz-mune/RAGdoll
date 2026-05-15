@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { FileUploadButton } from './FileUploadButton';
 import { AttachedFilesList } from './AttachedFilesList';
 import { ProfileSwitcher } from './ProfileSwitcher';
+import { PluginPickerButton } from './PluginPickerButton';
 import type { AttachedFile, ResponseStyle } from '@/types/chat';
 
 interface ChatInputProps {
@@ -144,6 +145,7 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
               responseStyle={responseStyle}
               onResponseStyleChange={setResponseStyle}
             />
+            <PluginPickerButton disabled={!activeConversationId} />
           </div>
 
           {/* Textarea */}
@@ -171,7 +173,7 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
         </div>
 
         <p className="text-[11px] text-muted-foreground">
-          Ctrl+Enter to send · Ctrl+P to switch profile
+          Ctrl+Enter to send · Ctrl+P to switch profile · 🧩 to toggle skills &amp; style
         </p>
       </div>
     </div>

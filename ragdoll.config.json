@@ -1,0 +1,30 @@
+{
+  "app": {
+    "name": "RAGdoll",
+    "version": "0.1.0",
+    "github": "https://github.com/itz-mune/RAGdoll"
+  },
+  "plugins": {
+    "registry_repo": "itz-mune/RAGdoll-plugins",
+    "registry_branch": "main",
+    "registry_file": "registry.json",
+    "registry_url": "https://raw.githubusercontent.com/itz-mune/RAGdoll-plugins/main/registry.json",
+    "github_api_base": "https://api.github.com/repos/itz-mune/RAGdoll-plugins",
+    "raw_base": "https://raw.githubusercontent.com/itz-mune/RAGdoll-plugins/main",
+    "preinstalled": [
+      "web-search",
+      "image-viewer",
+      "url-fetcher",
+      "youtube-transcript"
+    ]
+  },
+  "memory": {
+    "default_max_size_mb": 500,
+    "default_chunk_size": 400,
+    "default_chunk_overlap": 50
+  },
+  "sidecar": {
+    "port": 8765,
+    "host": "127.0.0.1"
+  }
+}

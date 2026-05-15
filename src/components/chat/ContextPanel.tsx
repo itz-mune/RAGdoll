@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, FileText, MessageSquare } from 'lucide-react';
 import { chatStore, type MemoryChunk, type Message } from '@/store/chatStore';
+import { cn } from '@/lib/utils';
 
 interface ContextPanelProps {
   isOpen: boolean;
@@ -16,9 +17,11 @@ export function ContextPanel({ isOpen, onToggle }: ContextPanelProps) {
     activeConversationId ? (state.messages[activeConversationId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES
   );
 
-  // Show memory from the last assistant message that has chunks
   const lastAssistantMessage = [...messages].reverse().find((m) => m.role === 'assistant');
   const chunks: MemoryChunk[] = lastAssistantMessage?.memoryChunks ?? EMPTY_CHUNKS;
+
+  const semChunks = chunks.filter((c) => c.source === 'conversation');
+  const docChunks = chunks.filter((c) => c.source !== 'conversation');
 
   return (
     <motion.div
@@ -38,7 +41,14 @@ export function ContextPanel({ isOpen, onToggle }: ContextPanelProps) {
               transition={{ duration: 0.1 }}
               className="flex w-full items-center justify-between px-3"
             >
-              <span className="text-sm font-medium">Memory used</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-medium">Memory used</span>
+                {chunks.length > 0 && (
+                  <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                    {chunks.length}
+                  </span>
+                )}
+              </div>
               <button
                 onClick={onToggle}
                 className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -67,23 +77,38 @@ export function ContextPanel({ isOpen, onToggle }: ContextPanelProps) {
         </AnimatePresence>
       </div>
 
-      {/* Content — only rendered when open to avoid layout issues */}
       {isOpen && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.15, delay: 0.05 }}
-          className="flex-1 overflow-y-auto p-3 space-y-3"
+          className="flex-1 overflow-y-auto p-3 space-y-4"
         >
           {chunks.length === 0 ? (
             <div className="space-y-1.5 text-xs text-muted-foreground">
-              <p className="font-medium text-foreground/70">No memory available yet</p>
+              <p className="font-medium text-foreground/70">No memory used</p>
               <p className="leading-relaxed">
-                RAGdoll will start remembering your conversations after a few exchanges.
+                RAGdoll searches your conversation history and documents before each reply.
+                Once you have stored memories, relevant context will appear here.
               </p>
             </div>
           ) : (
-            chunks.map((chunk) => <MemoryChunkCard key={chunk.id} chunk={chunk} />)
+            <>
+              {semChunks.length > 0 && (
+                <ChunkSection
+                  label="Conversation memory"
+                  icon={<MessageSquare className="h-3 w-3" />}
+                  chunks={semChunks}
+                />
+              )}
+              {docChunks.length > 0 && (
+                <ChunkSection
+                  label="Documents"
+                  icon={<FileText className="h-3 w-3" />}
+                  chunks={docChunks}
+                />
+              )}
+            </>
           )}
         </motion.div>
       )}
@@ -91,32 +116,46 @@ export function ContextPanel({ isOpen, onToggle }: ContextPanelProps) {
   );
 }
 
+function ChunkSection({
+  label,
+  icon,
+  chunks,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  chunks: MemoryChunk[];
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+        {icon}
+        {label}
+      </div>
+      {chunks.map((chunk) => (
+        <MemoryChunkCard key={chunk.id} chunk={chunk} />
+      ))}
+    </div>
+  );
+}
+
 function MemoryChunkCard({ chunk }: { chunk: MemoryChunk }) {
   const scoreColor =
-    chunk.score > 0.8
-      ? 'bg-green-500'
-      : chunk.score > 0.5
-        ? 'bg-amber-500'
-        : 'bg-muted-foreground/40';
-
+    chunk.score > 0.8 ? 'bg-green-500' : chunk.score > 0.5 ? 'bg-amber-500' : 'bg-muted-foreground/40';
   const scoreLabel =
-    chunk.score > 0.8
-      ? 'text-green-400'
-      : chunk.score > 0.5
-        ? 'text-amber-400'
-        : 'text-muted-foreground';
+    chunk.score > 0.8 ? 'text-green-400' : chunk.score > 0.5 ? 'text-amber-400' : 'text-muted-foreground';
+  const isDoc = chunk.source !== 'conversation';
 
   return (
-    <div className="rounded border border-border/50 bg-muted/20 p-2.5 text-xs space-y-2">
-      {/* Score bar */}
+    <div className="rounded border border-border/50 bg-muted/20 p-2.5 text-xs space-y-1.5">
+      {/* Relevance bar */}
       <div className="flex items-center gap-2">
         <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
           <div
-            className={`h-full rounded-full ${scoreColor} transition-all`}
+            className={cn('h-full rounded-full transition-all', scoreColor)}
             style={{ width: `${chunk.score * 100}%` }}
           />
         </div>
-        <span className={`tabular-nums ${scoreLabel}`}>{(chunk.score * 100).toFixed(0)}%</span>
+        <span className={cn('tabular-nums', scoreLabel)}>{(chunk.score * 100).toFixed(0)}%</span>
       </div>
 
       {/* Excerpt */}
@@ -125,9 +164,17 @@ function MemoryChunkCard({ chunk }: { chunk: MemoryChunk }) {
       </p>
 
       {/* Source badge */}
-      <span className="inline-block rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-        {chunk.source}
-      </span>
+      <div className="flex items-center gap-1">
+        {isDoc && <FileText className="h-2.5 w-2.5 text-blue-400/70" />}
+        <span className={cn(
+          'rounded px-1.5 py-0.5 text-[10px]',
+          isDoc
+            ? 'bg-blue-500/10 text-blue-400'
+            : 'bg-muted text-muted-foreground',
+        )}>
+          {chunk.source}
+        </span>
+      </div>
     </div>
   );
 }

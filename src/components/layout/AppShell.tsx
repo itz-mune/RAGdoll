@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PanelRight } from 'lucide-react';
+import { PanelRight, X, ArrowLeft } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { MessageThread } from '@/components/chat/MessageThread';
 import { ChatInput } from '@/components/chat/ChatInput';
 import { ContextPanel } from '@/components/chat/ContextPanel';
 import { DragDropZone } from '@/components/chat/DragDropZone';
+import { MemoryBrowser } from '@/components/memory/MemoryBrowser';
+import { MarketplacePage } from '@/components/marketplace/MarketplacePage';
+import { usePluginUpdateCount } from '@/hooks/usePluginUpdateCount';
 import { profileStore } from '@/store/profileStore';
 import { chatStore, type Conversation } from '@/store/chatStore';
 import type { AttachedFile } from '@/types/chat';
@@ -13,10 +16,15 @@ const SIDECAR_URL = 'http://127.0.0.1:8765';
 
 interface AppShellProps {
   onOpenSettings: () => void;
+  defaultMemoryBrowserOpen?: boolean;
+  onMemoryBrowserOpened?: () => void;
 }
 
-export function AppShell({ onOpenSettings }: AppShellProps) {
+export function AppShell({ onOpenSettings, defaultMemoryBrowserOpen, onMemoryBrowserOpened }: AppShellProps) {
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
+  const [memoryBrowserOpen, setMemoryBrowserOpen] = useState(false);
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+  const pluginUpdateCount = usePluginUpdateCount();
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [pendingFiles, setPendingFiles] = useState<AttachedFile[]>([]);
@@ -55,7 +63,14 @@ export function AppShell({ onOpenSettings }: AppShellProps) {
 
     fetch(`${SIDECAR_URL}/conversations/${activeConversationId}/messages`)
       .then((r) => r.json())
-      .then((msgs) => chatStore.getState().setMessages(activeConversationId, msgs))
+      .then((msgs) => {
+        // Map API snake_case / renamed fields → Message shape
+        const mapped = msgs.map((m: Record<string, unknown>) => ({
+          ...m,
+          toolCallsUsed: (m.toolCallsMade as string[] | null) ?? undefined,
+        }));
+        chatStore.getState().setMessages(activeConversationId, mapped);
+      })
       .catch(console.error);
   }, [activeConversationId]);
 
@@ -70,6 +85,14 @@ export function AppShell({ onOpenSettings }: AppShellProps) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // ── Open memory browser when navigated back from settings ────────────────
+  useEffect(() => {
+    if (defaultMemoryBrowserOpen) {
+      setMemoryBrowserOpen(true);
+      onMemoryBrowserOpened?.();
+    }
+  }, [defaultMemoryBrowserOpen, onMemoryBrowserOpened]);
 
   // ── Sync title draft ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -105,9 +128,14 @@ export function AppShell({ onOpenSettings }: AppShellProps) {
   const handleDragError = useCallback((msg: string) => console.warn('[DragDrop]', msg), []);
 
   return (
-    <div className="flex h-screen bg-background text-foreground overflow-hidden">
+    <div className="relative flex h-screen bg-background text-foreground overflow-hidden">
       {/* Sidebar */}
-      <Sidebar onOpenSettings={onOpenSettings} />
+      <Sidebar
+        onOpenSettings={onOpenSettings}
+        onOpenMemory={() => setMemoryBrowserOpen(true)}
+        onOpenMarketplace={() => setMarketplaceOpen(true)}
+        pluginUpdateCount={pluginUpdateCount}
+      />
 
       {/* Main chat column */}
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -170,6 +198,46 @@ export function AppShell({ onOpenSettings }: AppShellProps) {
 
       {/* Right context panel */}
       <ContextPanel isOpen={contextPanelOpen} onToggle={() => setContextPanelOpen((v) => !v)} />
+
+      {/* Marketplace full-page overlay */}
+      {marketplaceOpen && (
+        <div className="absolute inset-0 z-50 flex flex-col bg-background">
+          {/* Top bar */}
+          <div className="flex h-[53px] shrink-0 items-center gap-3 border-b border-border/50 px-4">
+            <button
+              onClick={() => setMarketplaceOpen(false)}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back to chat
+            </button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <MarketplacePage />
+          </div>
+        </div>
+      )}
+
+      {/* Memory browser overlay */}
+      {memoryBrowserOpen && (
+        <div className="absolute inset-0 z-50 flex items-stretch bg-background/80 backdrop-blur-sm">
+          <div className="relative flex w-full max-w-2xl flex-col rounded-r-xl border-r border-y border-border/60 bg-background shadow-2xl">
+            <div className="flex h-[53px] shrink-0 items-center justify-between border-b border-border/50 px-4">
+              <span className="text-sm font-semibold">Memory Browser</span>
+              <button
+                onClick={() => setMemoryBrowserOpen(false)}
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <MemoryBrowser />
+            </div>
+          </div>
+          <div className="flex-1" onClick={() => setMemoryBrowserOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }

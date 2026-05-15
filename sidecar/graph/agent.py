@@ -1,9 +1,10 @@
-"""LangGraph-based chat agent for RAGdoll."""
+"""LangGraph-based chat agent for RAGdoll — with plugin skill support and thinking extraction."""
 import json
 import operator
+import re
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.graph import END, START, StateGraph
@@ -11,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 
 MAX_STYLE_ITERATIONS = 5
 STYLE_PASS_SCORE = 0.86
+_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 
 
 # ── State ────────────────────────────────────────────────────────────────────
@@ -25,6 +27,8 @@ class ChatState(TypedDict):
     original_answer: str
     styled_answer: str
     final_answer: str
+    thinking_content: str           # ← extracted thinking text (all formats)
+    tool_calls_made: list           # ← names of tools that were called
     style_score: float
     style_feedback: str
     style_iteration: int
@@ -107,14 +111,12 @@ STYLE_CONTRACTS: dict[str, str] = {
 
 
 def get_style_contract(style: str | None) -> str:
-    """Return a strict style contract for style-chain enforcement."""
     return STYLE_CONTRACTS.get((style or "normal").lower(), STYLE_CONTRACTS["normal"])
 
 
 # ── LLM factory ──────────────────────────────────────────────────────────────
 
 def get_llm(provider: str, api_key: str, model: str | None = None, streaming: bool = True):
-    """Return a configured LangChain chat model for the given provider."""
     provider = provider.lower()
 
     if provider == "openai":
@@ -160,7 +162,7 @@ def get_llm(provider: str, api_key: str, model: str | None = None, streaming: bo
             base_url="https://openrouter.ai/api/v1",
             streaming=streaming,
             default_headers={
-                "HTTP-Referer": "https://github.com/ragdoll-app/ragdoll",
+                "HTTP-Referer": "https://github.com/itz-mune/RAGdoll",
                 "X-Title": "RAGdoll",
             },
         )
@@ -172,10 +174,49 @@ def get_llm(provider: str, api_key: str, model: str | None = None, streaming: bo
     raise ValueError(f"Unknown provider: {provider!r}")
 
 
+# ── Thinking extraction helpers ───────────────────────────────────────────────
+
+def _extract_thinking_from_content(content) -> tuple[str, str]:
+    """
+    Given an LLM message content (str or list of blocks), extract any thinking
+    content and return (thinking_text, response_text).
+
+    Handles:
+      1. <think>...</think> tags embedded in text (DeepSeek, Qwen, local models)
+      2. {"type": "thinking", "thinking": "..."} blocks (Claude extended thinking)
+      3. {"type": "reasoning_content", ...} (OpenAI o1)
+    """
+    thinking_parts: list[str] = []
+    text_parts: list[str] = []
+
+    if isinstance(content, list):
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type", "")
+            if btype == "thinking":
+                thinking_parts.append(block.get("thinking", ""))
+            elif btype == "text":
+                text = block.get("text", "")
+                # also check for <think> tags inside text blocks
+                thinks = _THINK_RE.findall(text)
+                thinking_parts.extend(thinks)
+                text_parts.append(_THINK_RE.sub("", text).strip())
+            elif btype in ("reasoning_content", "reasoning"):
+                thinking_parts.append(block.get("content", block.get("reasoning_content", "")))
+    else:
+        text = str(content or "")
+        thinks = _THINK_RE.findall(text)
+        thinking_parts.extend(thinks)
+        text_parts.append(_THINK_RE.sub("", text).strip())
+
+    return "\n\n".join(t.strip() for t in thinking_parts if t.strip()), \
+           "\n".join(t for t in text_parts if t)
+
+
 # ── Style scoring ────────────────────────────────────────────────────────────
 
 def deterministic_style_feedback(text: str, style: str | None) -> tuple[float, str]:
-    """Cheap deterministic validation that contributes to the style score."""
     normalized = (style or "").lower()
     words = text.split()
     sentences = [s for s in text.replace("!", ".").replace("?", ".").split(".") if s.strip()]
@@ -201,7 +242,6 @@ def deterministic_style_feedback(text: str, style: str | None) -> tuple[float, s
         if any(marker in padded for marker in casual_markers):
             penalties.append("Too casual: Formal must avoid contractions and slang.")
     elif normalized == "normal":
-        # Normal style has fewer restrictions; just ensure it's reasonably balanced
         if len(words) < 10:
             penalties.append("Too brief: Normal should provide sufficient context.")
 
@@ -210,13 +250,11 @@ def deterministic_style_feedback(text: str, style: str | None) -> tuple[float, s
 
 
 def parse_style_chain_output(raw: str) -> tuple[str, float, str]:
-    """Parse the style chain JSON; degrade gracefully if a model emits prose."""
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
         if cleaned.lower().startswith("json"):
             cleaned = cleaned[4:].strip()
-
     try:
         data = json.loads(cleaned)
         answer = str(data.get("answer", "")).strip()
@@ -226,7 +264,77 @@ def parse_style_chain_output(raw: str) -> tuple[str, float, str]:
             feedback = "\n".join(str(item) for item in feedback if item)
         return answer or cleaned, max(0.0, min(score, 1.0)), str(feedback or "")
     except Exception:
-        return cleaned, 0.55, "The style chain did not return valid JSON; retry with stricter formatting."
+        return cleaned, 0.55, "The style chain did not return valid JSON; retry."
+
+
+# ── Tool execution helper ─────────────────────────────────────────────────────
+
+async def _run_tool_loop(
+    llm_with_tools,
+    messages: list[BaseMessage],
+    max_iterations: int = 5,
+    event_queue=None,          # asyncio.Queue | None — receives {"type":"tool_use"} early
+) -> tuple[str, str, list[BaseMessage], list[str]]:
+    """
+    Run an agentic tool-use loop.
+    Returns (thinking, final_text, updated_messages, tool_names_used).
+
+    When *event_queue* is provided, a {"type": "tool_use", "tools": [...]} dict is
+    pushed into the queue the moment tool calls are identified — BEFORE the tools
+    actually run.  This lets the SSE stream show "Using X…" immediately instead of
+    only after the full graph finishes.
+    """
+    from langchain_core.messages import ToolMessage
+    loop_messages = list(messages)
+    thinking_parts: list[str] = []
+    tool_names_used: list[str] = []
+
+    for _ in range(max_iterations):
+        response = await llm_with_tools.ainvoke(loop_messages)
+        loop_messages.append(response)
+
+        # Extract thinking from this response
+        thinking, text = _extract_thinking_from_content(response.content)
+        if thinking:
+            thinking_parts.append(thinking)
+
+        # Check for tool calls
+        tool_calls = getattr(response, "tool_calls", None) or []
+        if not tool_calls:
+            # No more tool calls — done
+            return "\n\n".join(thinking_parts), text or str(response.content), loop_messages, tool_names_used
+
+        # Collect the names of every tool that's about to run
+        for tc in tool_calls:
+            tool_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+            if tool_name and tool_name not in tool_names_used:
+                tool_names_used.append(tool_name)
+
+        # ↑ Signal the SSE queue NOW — tools haven't run yet but we know their names.
+        # The frontend will immediately swap "..." → "Using Web Search…".
+        if event_queue is not None:
+            await event_queue.put({"type": "tool_use", "tools": list(tool_names_used)})
+
+        # Execute each tool call
+        for tc in tool_calls:
+            tool_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+            tool_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
+            tool_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+            result = f"Tool {tool_name!r} not found."
+            try:
+                from plugins.loader import get_enabled_skills
+                for skill in get_enabled_skills():
+                    if getattr(skill, "name", None) == tool_name:
+                        result = skill.invoke(tool_args)
+                        break
+            except Exception as exc:
+                result = f"Tool error: {exc}"
+            loop_messages.append(ToolMessage(content=str(result), tool_call_id=tool_id))
+
+    # Max iterations reached — return what we have
+    last = loop_messages[-1]
+    _, text = _extract_thinking_from_content(getattr(last, "content", ""))
+    return "\n\n".join(thinking_parts), text or str(getattr(last, "content", "")), loop_messages, tool_names_used
 
 
 # ── Graph factory ─────────────────────────────────────────────────────────────
@@ -237,20 +345,15 @@ def build_chat_graph(
     model: str | None = None,
     style: str | None = None,
     has_style: bool = False,
+    tools: list | None = None,
+    event_queue=None,          # asyncio.Queue | None — forwarded to _run_tool_loop
 ):
-    """
-    Build and compile the chat graph.
-
-    Topology:
-        START -> normal_answer
-        normal_answer -> publish_original       when no style is selected
-        normal_answer -> style_chain            when a style is selected
-        style_chain -> publish_styled           when score is high enough or max iterations reached
-        style_chain -> style_chain              while score is low and iterations < 5
-    """
-    answer_llm = get_llm(provider, api_key, model, streaming=False).with_config(tags=["normal_answer"])
+    """Build and compile the chat graph, optionally with plugin skill tools."""
+    base_llm = get_llm(provider, api_key, model, streaming=False)
+    answer_llm = (base_llm.bind_tools(tools) if tools else base_llm).with_config(tags=["normal_answer"])
     style_llm = get_llm(provider, api_key, model, streaming=False).with_config(tags=["style_chain"])
     style_contract = get_style_contract(style)
+    has_tools = bool(tools)
 
     style_prompt = ChatPromptTemplate.from_messages([
         ("system",
@@ -270,13 +373,28 @@ def build_chat_graph(
     style_chain = style_prompt | style_llm | StrOutputParser()
 
     async def normal_answer_node(state: ChatState) -> dict:
-        response = await answer_llm.ainvoke(state["messages"])
-        content = response.content if isinstance(response.content, str) else str(response.content)
-        return {
-            "original_answer": content,
-            "final_answer": content,
-            "messages": [AIMessage(content=content)],
-        }
+        if has_tools:
+            thinking, text, updated_msgs, tool_names = await _run_tool_loop(
+                answer_llm, state["messages"], event_queue=event_queue,
+            )
+            return {
+                "original_answer": text,
+                "final_answer": text,
+                "thinking_content": thinking,
+                "tool_calls_made": tool_names,
+                "messages": [AIMessage(content=text)],
+            }
+        else:
+            response = await answer_llm.ainvoke(state["messages"])
+            thinking, text = _extract_thinking_from_content(response.content)
+            content = text or (response.content if isinstance(response.content, str) else str(response.content))
+            return {
+                "original_answer": content,
+                "final_answer": content,
+                "thinking_content": thinking,
+                "tool_calls_made": [],
+                "messages": [AIMessage(content=content)],
+            }
 
     def route_after_normal_answer(state: ChatState) -> str:
         return "style" if state["has_style"] else "publish"

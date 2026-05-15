@@ -36,6 +36,19 @@ class MessageModel(SQLModel, table=True):
     citations: Optional[str] = Field(default=None)       # JSON array string
     display_content: Optional[str] = Field(default=None)
     attached_file_names: Optional[str] = Field(default=None)  # JSON array string
+    tool_calls_made: Optional[str] = Field(default=None)      # JSON array string
+
+
+class ConversationSummary(SQLModel, table=True):
+    """LLM-generated summary of a compacted conversation."""
+
+    __tablename__ = "conversation_summaries"  # type: ignore[assignment]
+
+    id: str = Field(primary_key=True)
+    conversation_id: str = Field(index=True)
+    summary_text: str
+    chunk_count_summarized: int = 0
+    created_at: int = 0  # Unix timestamp ms
 
 
 def init_db() -> None:
@@ -49,6 +62,7 @@ def init_db() -> None:
             "ALTER TABLE messages ADD COLUMN citations TEXT",
             "ALTER TABLE messages ADD COLUMN display_content TEXT",
             "ALTER TABLE messages ADD COLUMN attached_file_names TEXT",
+            "ALTER TABLE messages ADD COLUMN tool_calls_made TEXT",
         ]:
             try:
                 session.exec(text(stmt))

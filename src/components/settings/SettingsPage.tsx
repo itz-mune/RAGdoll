@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ArrowLeft, Settings, Cpu, Brain, Palette, Keyboard, Info,
-  Trash2, Download, Sun, Moon, Monitor,
+  Trash2, Download, Sun, Moon, Monitor, RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -165,21 +165,127 @@ function GeneralSection() {
   );
 }
 
-function MemorySection() {
+function MemorySection({ onOpenMemoryBrowser }: { onOpenMemoryBrowser?: () => void }) {
+  const [stats, setStats] = useState<{
+    semantic_count: number;
+    document_count: number;
+    total_size_mb: number;
+  } | null>(null);
+  const [compacting, setCompacting] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState('');
+  const [clearDocsOpen, setClearDocsOpen] = useState(false);
+
+  useEffect(() => {
+    fetch(`${SIDECAR_URL}/memory/stats`)
+      .then((r) => r.json())
+      .then(setStats)
+      .catch(() => {});
+  }, []);
+
+  const handleCompact = async () => {
+    setCompacting(true);
+    try {
+      await fetch(`${SIDECAR_URL}/memory/compact`, { method: 'POST' });
+      const r = await fetch(`${SIDECAR_URL}/memory/stats`);
+      if (r.ok) setStats(await r.json());
+    } finally { setCompacting(false); }
+  };
+
+  const handleClearAll = async () => {
+    if (clearConfirm.toLowerCase() !== 'clear') return;
+    await fetch(`${SIDECAR_URL}/memory/all`, { method: 'DELETE' });
+    setClearConfirm('');
+    const r = await fetch(`${SIDECAR_URL}/memory/stats`);
+    if (r.ok) setStats(await r.json());
+  };
+
   return (
-    <div className="p-6 space-y-4">
+    <div className="space-y-6 p-6">
       <div>
         <h2 className="text-lg font-semibold">Memory</h2>
-        <p className="text-sm text-muted-foreground">Semantic memory engine — coming in Task 5</p>
-      </div>
-      <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 py-14 text-center">
-        <Brain className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
-        <p className="font-semibold text-foreground">Memory Engine — Coming Soon</p>
-        <p className="mt-1 text-sm text-muted-foreground max-w-xs mx-auto">
-          RAGdoll will automatically embed every conversation turn into a local vector database and surface relevant context in future chats.
+        <p className="text-sm text-muted-foreground">
+          RAGdoll embeds your conversations and documents into a local vector database.
         </p>
-        <div className="mt-6 inline-flex items-center gap-2 rounded-lg bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
-          Total memories stored: <strong className="text-foreground">0</strong>
+      </div>
+
+      {/* Stats cards */}
+      <div className="grid grid-cols-2 gap-3">
+        {[
+          { label: 'Memories stored', value: stats?.semantic_count ?? '—' },
+          { label: 'Document chunks', value: stats?.document_count ?? '—' },
+          { label: 'Storage used', value: stats ? `${stats.total_size_mb} MB` : '—' },
+          { label: 'Embedding model', value: 'all-MiniLM-L6-v2' },
+        ].map(({ label, value }) => (
+          <div key={label} className="rounded-xl border border-border/50 bg-muted/20 p-3">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+            <p className="mt-1 text-lg font-semibold">{value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Memory browser link */}
+      <div className="rounded-xl border border-border/50 bg-muted/20 p-4 space-y-3">
+        <p className="text-sm font-medium">Knowledge base</p>
+        <p className="text-xs text-muted-foreground">
+          Browse, search, and manage your stored memories and documents.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onOpenMemoryBrowser?.()}
+          className="gap-1.5"
+        >
+          <Brain className="h-3.5 w-3.5" />
+          Open Memory Browser
+        </Button>
+      </div>
+
+      {/* Maintenance */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Maintenance</p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCompact}
+            disabled={compacting}
+            className="gap-1.5"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', compacting && 'animate-spin')} />
+            {compacting ? 'Optimising…' : 'Optimise memory'}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Removes duplicate chunks and prunes low-value memories older than 30 days.
+        </p>
+      </div>
+
+      {/* Danger zone */}
+      <div className="space-y-3 rounded-xl border border-destructive/30 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-destructive/70">Danger Zone</p>
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Type <strong>clear</strong> then click the button to erase all conversation memories.
+            Stored documents are unaffected.
+          </p>
+          <div className="flex items-center gap-2">
+            <input
+              value={clearConfirm}
+              onChange={(e) => setClearConfirm(e.target.value)}
+              placeholder="Type 'clear'"
+              className="w-32 rounded border border-border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-destructive/40"
+            />
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={clearConfirm.toLowerCase() !== 'clear'}
+              onClick={handleClearAll}
+              className="gap-1.5"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear all memories
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -358,15 +464,16 @@ function AboutSection() {
 interface SettingsPageProps {
   onBack: () => void;
   initialSection?: Section;
+  onOpenMemoryBrowser?: () => void;
 }
 
-export function SettingsPage({ onBack, initialSection = 'general' }: SettingsPageProps) {
+export function SettingsPage({ onBack, initialSection = 'general', onOpenMemoryBrowser }: SettingsPageProps) {
   const [activeSection, setActiveSection] = useState<Section>(initialSection);
 
   const SECTION_CONTENT: Record<Section, React.ReactNode> = {
     general: <GeneralSection />,
     profiles: <ModelProfilesSection />,
-    memory: <MemorySection />,
+    memory: <MemorySection onOpenMemoryBrowser={onOpenMemoryBrowser} />,
     appearance: <AppearanceSection />,
     shortcuts: <ShortcutsSection />,
     about: <AboutSection />,

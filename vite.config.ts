@@ -18,5 +18,12 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      ignored: ['**/sidecar/**'],
+    },
+  },
+
+  optimizeDeps: {
+    include: ['pdfjs-dist'],
   },
 })

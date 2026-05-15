@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Copy, ThumbsUp, ThumbsDown, ChevronDown, Check, FileText, FileSpreadsheet, Braces, FileCode, Quote } from 'lucide-react';
+import { Copy, ThumbsUp, ThumbsDown, ChevronDown, Check, FileText, FileSpreadsheet, Braces, FileCode, RotateCcw } from 'lucide-react';
+import { ThinkingBlock } from '@/components/chat/ThinkingBlock';
+import { ToolCallIndicator, SkillLoadingIndicator } from '@/components/chat/ToolCallIndicator';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'framer-motion';
-import { chatStore, type Message } from '@/store/chatStore';
+import { chatStore, type Message, type MemoryChunk } from '@/store/chatStore';
+import { DocumentViewerModal } from '@/components/memory/DocumentViewerModal';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/hooks/useChat';
@@ -105,9 +108,19 @@ export function MessageThread() {
         className="h-full overflow-y-auto px-4 py-6"
       >
         <div className="mx-auto max-w-3xl space-y-5">
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {messages.map((message, idx) => {
+            const onRegenerate =
+              message.role === 'assistant'
+                ? () => {
+                    if (!activeConversationId) return;
+                    const prevUser = messages.slice(0, idx).reverse().find((m) => m.role === 'user');
+                    if (!prevUser) return;
+                    chatStore.getState().removeMessages(activeConversationId, [message.id, prevUser.id]);
+                    void sendMessage(prevUser.content);
+                  }
+                : undefined;
+            return <MessageBubble key={message.id} message={message} onRegenerate={onRegenerate} />;
+          })}
         </div>
         <div ref={bottomRef} />
       </div>
@@ -149,7 +162,7 @@ function FileAttachIcon({ name }: { name: string }) {
 
 // ─── Individual message bubble ────────────────────────────────────────────────
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message, onRegenerate }: { message: Message; onRegenerate?: () => void }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
   const activeConversationId = chatStore((state) => state.activeConversationId);
@@ -168,13 +181,38 @@ function MessageBubble({ message }: { message: Message }) {
     chatStore.getState().setMessageFeedback(activeConversationId, message.id, feedback);
   };
 
+  const hasThinking = !isUser && (message.thinkingContent != null);
+  const hasToolCalls = !isUser && !!message.toolCallsUsed?.length;
+
   return (
     <motion.div
       initial={{ y: 10, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.15 }}
-      className={cn('flex', isUser ? 'justify-end' : 'justify-start')}
+      className={cn('flex flex-col', isUser ? 'items-end' : 'items-start')}
     >
+      {/* Tool-use pill — only rendered once streaming is done (quiet "Used X" state).
+          While still streaming the inline SkillLoadingIndicator inside the bubble
+          handles the active "Using X…" display instead. */}
+      {hasToolCalls && !message.isStreaming && (
+        <div className="w-full max-w-[72%]">
+          <ToolCallIndicator
+            tools={message.toolCallsUsed!}
+            isStreaming={false}
+          />
+        </div>
+      )}
+
+      {/* Thinking block — shown above assistant bubbles that have thinking content */}
+      {hasThinking && (
+        <div className="w-full max-w-[72%]">
+          <ThinkingBlock
+            content={message.thinkingContent ?? ''}
+            duration={message.thinkingDuration ?? null}
+            isStreaming={message.isStreaming && message.thinkingDuration == null}
+          />
+        </div>
+      )}
       <div
         className={cn(
           'group relative min-w-0 max-w-[72%] overflow-hidden rounded-xl px-4 py-3',
@@ -271,13 +309,17 @@ function MessageBubble({ message }: { message: Message }) {
           </div>
         )}
 
-        {/* Typing indicator — dots before any text arrives */}
+        {/* Typing indicator — skill name or dots before any text arrives */}
         {message.isStreaming && !message.content && (
-          <span className="flex items-center gap-1 py-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:0ms]" />
-            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:150ms]" />
-            <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:300ms]" />
-          </span>
+          hasToolCalls ? (
+            <SkillLoadingIndicator tools={message.toolCallsUsed!} />
+          ) : (
+            <span className="flex items-center gap-1 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:0ms]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:150ms]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60 animate-bounce [animation-delay:300ms]" />
+            </span>
+          )
         )}
 
         {/* Assistant toolbar (visible on hover) */}
@@ -319,34 +361,110 @@ function MessageBubble({ message }: { message: Message }) {
               >
                 <ThumbsDown className="h-3 w-3" />
               </Button>
+              {onRegenerate && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={onRegenerate}
+                  title="Regenerate response"
+                  className="h-6 w-6"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                </Button>
+              )}
             </div>
           </div>
         )}
 
-        {/* Citation chips */}
-        {!isUser && message.citations && message.citations.length > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-1">
-            <Quote className="h-2.5 w-2.5 shrink-0 text-blue-400/70" />
-            {message.citations.map((fname) => (
-              <span
-                key={fname}
-                className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium text-blue-400 ring-1 ring-blue-500/20"
-              >
-                <FileAttachIcon name={fname} />
-                {fname}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Memory badge */}
-        {message.memoryChunks && message.memoryChunks.length > 0 && (
-          <div className="mt-2 inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-            {message.memoryChunks.length}{' '}
-            {message.memoryChunks.length === 1 ? 'source' : 'sources'} used
-          </div>
+        {/* Source citations */}
+        {!isUser && !message.isStreaming && (
+          <SourceCitations memoryChunks={message.memoryChunks} citations={message.citations} />
         )}
       </div>
     </motion.div>
+  );
+}
+
+// ─── Source citations (document-only pills + viewer modal) ───────────────────
+
+function DocPillIcon({ filename }: { filename: string }) {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'pdf')  return <FileText className="h-2.5 w-2.5 shrink-0 text-red-400" />;
+  if (ext === 'csv')  return <FileSpreadsheet className="h-2.5 w-2.5 shrink-0 text-green-400" />;
+  if (ext === 'json') return <Braces className="h-2.5 w-2.5 shrink-0 text-yellow-400" />;
+  if (ext === 'md')   return <FileCode className="h-2.5 w-2.5 shrink-0 text-blue-400" />;
+  return <FileText className="h-2.5 w-2.5 shrink-0" />;
+}
+
+function SourceCitations({
+  memoryChunks,
+  citations,
+}: {
+  memoryChunks: MemoryChunk[] | null;
+  citations?: string[];
+}) {
+  const [viewer, setViewer] = useState<{ filename: string; chunks: MemoryChunk[] } | null>(null);
+
+  // Only surface document sources (skip conversation memory)
+  const docChunks = memoryChunks?.filter((c) => c.source !== 'conversation') ?? [];
+
+  const docGroupMap = docChunks.reduce<Record<string, MemoryChunk[]>>((acc, c) => {
+    (acc[c.source] ??= []).push(c);
+    return acc;
+  }, {});
+
+  // filenames explicitly cited in the response text but not in vector chunks
+  const citationOnly = (citations ?? []).filter((f) => !docGroupMap[f]);
+
+  if (Object.keys(docGroupMap).length === 0 && citationOnly.length === 0) return null;
+
+  return (
+    <>
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-border/20 pt-2">
+        <span className="text-[9px] font-medium uppercase tracking-wider text-muted-foreground/40 mr-0.5">
+          Sources
+        </span>
+
+        {Object.entries(docGroupMap).map(([filename, chunks]) => (
+          <button
+            key={filename}
+            onClick={() => setViewer({ filename, chunks })}
+            title={`View ${filename}`}
+            className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[10px] font-medium text-blue-400 ring-1 ring-blue-500/20 transition-colors hover:bg-blue-500/18 hover:text-blue-300 hover:ring-blue-400/30 active:scale-95"
+          >
+            <DocPillIcon filename={filename} />
+            <span className="max-w-[140px] truncate">{filename}</span>
+            {chunks.length > 1 && (
+              <span className="rounded-full bg-blue-400/20 px-1.5 py-px text-[9px] leading-tight tabular-nums">
+                {chunks.length}
+              </span>
+            )}
+          </button>
+        ))}
+
+        {citationOnly.map((f) => (
+          <button
+            key={f}
+            onClick={() => setViewer({ filename: f, chunks: [] })}
+            title={`View ${f}`}
+            className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/8 px-2.5 py-0.5 text-[10px] font-medium text-blue-400/60 ring-1 ring-blue-500/15 transition-colors hover:bg-blue-500/15 hover:text-blue-400"
+          >
+            <DocPillIcon filename={f} />
+            <span className="max-w-[140px] truncate">{f}</span>
+          </button>
+        ))}
+      </div>
+
+      <AnimatePresence>
+        {viewer && (
+          <DocumentViewerModal
+            key={viewer.filename}
+            filename={viewer.filename}
+            chunkTexts={viewer.chunks.map((c) => c.text)}
+            onClose={() => setViewer(null)}
+          />
+        )}
+      </AnimatePresence>
+    </>
   );
 }

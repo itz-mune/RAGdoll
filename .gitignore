@@ -33,6 +33,14 @@ mcp.json
 plugins/
 sidecar/plugins/
 
+# Separate plugins repo (own git repo — pushed independently)
+plugins-repo/
+
+# Runtime directories created by the sidecar at startup
+ragdoll_plugins/
+ragdoll_memory/
+sidecar/ragdoll_memory/
+
 # Local notes
 INSTALLATION_COMMANDS.md
 PROVIDER_EXTENSION_SUMMARY.md

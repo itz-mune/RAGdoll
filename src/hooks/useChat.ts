@@ -137,6 +137,7 @@ export function useChat(): UseChatReturn {
       let buffer = '';
       let pendingMemoryChunks: MemoryChunk[] | null = null;
       let pendingCitations: string[] | null = null;
+      let thinkingStartTime: number | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -162,8 +163,17 @@ export function useChat(): UseChatReturn {
               message?: string;
             };
 
-            if (event.type === 'chunk') {
+            if (event.type === 'tool_use') {
+              chatStore.getState().setToolCallsUsed(streamingMessageId, event.tools ?? []);
+            } else if (event.type === 'chunk') {
               chatStore.getState().appendToStreamingMessage(streamingMessageId, event.content ?? '');
+            } else if (event.type === 'thinking') {
+              thinkingStartTime ??= Date.now();
+              chatStore.getState().setThinkingContent(streamingMessageId, event.content ?? '');
+            } else if (event.type === 'thinking_done') {
+              if (thinkingStartTime) {
+                chatStore.getState().finalizeThinking(streamingMessageId, (Date.now() - thinkingStartTime) / 1000);
+              }
             } else if (event.type === 'memory') {
               pendingMemoryChunks = event.chunks ?? null;
             } else if (event.type === 'citations') {

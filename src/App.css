@@ -4,6 +4,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@keyframes tool-shimmer {
+  0%   { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+
+@utility animate-tool-shimmer {
+  animation: tool-shimmer 2s linear infinite;
+}
+
 @layer base {
   .theme {
     --font-heading: var(--font-sans);

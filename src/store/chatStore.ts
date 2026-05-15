@@ -23,6 +23,9 @@ export interface Message {
   feedback?: 'up' | 'down' | null;
   attachedFileNames?: string[];
   citations?: string[];
+  thinkingContent?: string | null;
+  thinkingDuration?: number | null;   // seconds
+  toolCallsUsed?: string[];           // tool names used to produce this message
 }
 
 export interface Conversation {
@@ -54,8 +57,12 @@ interface ChatStore {
   finalizeStreamingMessage: (messageId: string, memoryChunks?: MemoryChunk[] | null, citations?: string[] | null) => void;
   updateConversationTitle: (id: string, title: string) => void;
   setMessageFeedback: (conversationId: string, messageId: string, feedback: 'up' | 'down' | null) => void;
+  removeMessages: (conversationId: string, ids: string[]) => void;
   setStreaming: (isStreaming: boolean) => void;
   clearAll: () => void;
+  setThinkingContent: (messageId: string, content: string) => void;
+  finalizeThinking: (messageId: string, durationSeconds: number) => void;
+  setToolCallsUsed: (messageId: string, tools: string[]) => void;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -153,6 +160,16 @@ export const useChatStore = create<ChatStore>()(
         },
       })),
 
+    removeMessages: (conversationId, ids) =>
+      set((state) => ({
+        messages: {
+          ...state.messages,
+          [conversationId]: (state.messages[conversationId] ?? []).filter(
+            (m) => !ids.includes(m.id)
+          ),
+        },
+      })),
+
     setStreaming: (isStreaming) => set({ isStreaming }),
 
     clearAll: () =>
@@ -162,6 +179,48 @@ export const useChatStore = create<ChatStore>()(
         messages: {},
         isStreaming: false,
         streamingMessageId: null,
+      }),
+
+    setThinkingContent: (messageId, content) =>
+      set((state) => {
+        const activeConvId = state.activeConversationId;
+        if (!activeConvId) return state;
+        return {
+          messages: {
+            ...state.messages,
+            [activeConvId]: (state.messages[activeConvId] ?? []).map((msg) =>
+              msg.id === messageId ? { ...msg, thinkingContent: content } : msg
+            ),
+          },
+        };
+      }),
+
+    finalizeThinking: (messageId, durationSeconds) =>
+      set((state) => {
+        const activeConvId = state.activeConversationId;
+        if (!activeConvId) return state;
+        return {
+          messages: {
+            ...state.messages,
+            [activeConvId]: (state.messages[activeConvId] ?? []).map((msg) =>
+              msg.id === messageId ? { ...msg, thinkingDuration: durationSeconds } : msg
+            ),
+          },
+        };
+      }),
+
+    setToolCallsUsed: (messageId, tools) =>
+      set((state) => {
+        const activeConvId = state.activeConversationId;
+        if (!activeConvId) return state;
+        return {
+          messages: {
+            ...state.messages,
+            [activeConvId]: (state.messages[activeConvId] ?? []).map((msg) =>
+              msg.id === messageId ? { ...msg, toolCallsUsed: tools } : msg
+            ),
+          },
+        };
       }),
   }))
 );
