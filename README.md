@@ -9,7 +9,7 @@ Your conversations, your documents, your models — all on your machine.
 
 [![Release](https://img.shields.io/github/v/release/itz-mune/RAGdoll?style=flat-square&color=7c3aed)](https://github.com/itz-mune/RAGdoll/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-7c3aed?style=flat-square)](https://github.com/itz-mune/RAGdoll/releases/latest)
-[![License](https://img.shields.io/github/license/itz-mune/RAGdoll?style=flat-square&color=7c3aed)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-7c3aed?style=flat-square)](LICENSE)
 
 <!-- screenshot: drop a demo screenshot or GIF here -->
 ![RAGdoll screenshot](docs/Screenshot.png)
