@@ -12,7 +12,7 @@ Your conversations, your documents, your models — all on your machine.
 [![License](https://img.shields.io/github/license/itz-mune/RAGdoll?style=flat-square&color=7c3aed)](LICENSE)
 
 <!-- screenshot: drop a demo screenshot or GIF here -->
-<!-- ![RAGdoll screenshot](docs/screenshot.png) -->
+![RAGdoll screenshot](docs/screenshot.png)
 
 </div>
 
