@@ -78,8 +78,11 @@ a = Analysis(
         'jupyter',
         'notebook',
         'pytest',
-        'setuptools',
-        'distutils',
+        # NOTE: do NOT exclude setuptools or distutils — PyInstaller has an
+        # internal alias hook (distutils → setuptools._distutils) that raises
+        # ValueError if either is marked excluded before the hook runs.
+        'tensorboard',           # optional torch.utils.tensorboard — not needed
+        'torch.utils.tensorboard',
         'test',
         'unittest',
     ],
