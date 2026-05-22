@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys as _sys
 import warnings
 from collections import OrderedDict
 from pathlib import Path
@@ -19,7 +20,27 @@ warnings.filterwarnings("ignore", message=".*unauthenticated.*")
 warnings.filterwarnings("ignore", message=".*HF_TOKEN.*")
 
 MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
-_ONNX_DIR = Path(__file__).parent.parent / "models" / "all-MiniLM-L6-v2-onnx"
+
+
+def _resolve_onnx_dir() -> Path:
+    """Return the ONNX model directory, handling PyInstaller onefile bundles.
+
+    In a PyInstaller --onefile build the frozen binary extracts its data payload
+    into a temporary directory exposed as ``sys._MEIPASS``.  All ``datas`` entries
+    land there, so the model directory will be at ``_MEIPASS/models/...``.
+
+    In normal (dev) Python, the model lives at ``sidecar/models/...`` relative to
+    this source file.
+    """
+    if getattr(_sys, "frozen", False):
+        # PyInstaller onefile: data is under _MEIPASS
+        base = Path(getattr(_sys, "_MEIPASS", Path(_sys.executable).parent))
+        return base / "models" / "all-MiniLM-L6-v2-onnx"
+    # Regular Python: two levels up from memory/embedder.py → sidecar/models/
+    return Path(__file__).parent.parent / "models" / "all-MiniLM-L6-v2-onnx"
+
+
+_ONNX_DIR = _resolve_onnx_dir()
 _LRU_MAX = 2048
 
 # LRU cache: MD5(text) → normalized float32 list

@@ -17,6 +17,10 @@ from pathlib import Path
 
 HERE = Path(SPECPATH)
 
+# Pre-exported ONNX model — must exist before running PyInstaller.
+# The CI workflow runs `python -c "from memory.embedder import ..."` first.
+_ONNX_MODEL_DIR = HERE / "models" / "all-MiniLM-L6-v2-onnx"
+
 # Collect all .py packages inside the sidecar so hidden imports are found
 hidden_imports = [
     # FastAPI / Starlette internals not always auto-detected
@@ -61,28 +65,46 @@ a = Analysis(
     ['main.py'],
     pathex=[str(HERE)],
     binaries=[],
-    datas=[
-        # Include any local config / model files that live next to main.py
-        # Extend this list if you add static assets to the sidecar.
-        # Example: ('models/some-model.onnx', 'models'),
-    ],
+    datas=(
+        # Include the pre-exported ONNX model so the embedded binary can run
+        # without needing PyTorch or an internet connection at first launch.
+        # The CI workflow exports this model before invoking PyInstaller.
+        [(str(_ONNX_MODEL_DIR), "models/all-MiniLM-L6-v2-onnx")]
+        if _ONNX_MODEL_DIR.exists()
+        else []
+    ),
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Strip heavy packages that are never used at runtime
+        # Strip heavy packages that are never used at runtime.
+        # NOTE: do NOT list setuptools or distutils here — PyInstaller has an
+        # internal alias hook (distutils → setuptools._distutils) that raises
+        # ValueError: "already imported as ExcludedModule" if they appear here.
         'tkinter',
         'matplotlib',
         'IPython',
         'jupyter',
         'notebook',
         'pytest',
-        # NOTE: do NOT exclude setuptools or distutils — PyInstaller has an
-        # internal alias hook (distutils → setuptools._distutils) that raises
-        # ValueError if either is marked excluded before the hook runs.
-        'tensorboard',           # optional torch.utils.tensorboard — not needed
+        'tensorboard',
         'torch.utils.tensorboard',
+        # ── PyTorch ecosystem (~2-3 GB on Linux) ──────────────────────────────
+        # The embedder uses ONNX Runtime at inference time; torch is only needed
+        # for the one-time model export, which the CI workflow runs BEFORE
+        # PyInstaller so the result is bundled as a datas entry above.
+        'torch',
+        'torchvision',
+        'torchaudio',
+        'triton',
+        'flash_attn',
+        # Training utilities inside transformers/optimum — not used at inference
+        'optimum.exporters',
+        'tensorflow',
+        'keras',
+        'jax',
+        'flax',
         'test',
         'unittest',
     ],

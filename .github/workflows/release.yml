@@ -13,6 +13,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # Opt into Node.js 24 for all actions (avoids Node 20 deprecation warnings)
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: Build · ${{ matrix.target }}
@@ -52,6 +56,21 @@ jobs:
         working-directory: sidecar
         run: uv sync --frozen
 
+      # Export the ONNX model BEFORE PyInstaller so it gets bundled into the
+      # binary as a datas entry. This avoids bundling the full PyTorch runtime
+      # (~2-3 GB) which would push the onefile archive over PyInstaller's 4 GB
+      # CArchive limit. The model (~25 MB quantized) is tiny by comparison.
+      - name: Pre-export ONNX embedding model
+        working-directory: sidecar
+        run: >
+          uv run python -c "
+          import sys, os; sys.path.insert(0, '.');
+          os.environ['HF_HUB_DISABLE_IMPLICIT_TOKEN'] = '1';
+          from memory.embedder import _ONNX_DIR, _export_onnx;
+          (_export_onnx() if not _ONNX_DIR.exists()
+           else print('[CI] ONNX model already present at', _ONNX_DIR))
+          "
+
       - name: Build sidecar with PyInstaller
         working-directory: sidecar
         run: uv run pyinstaller ragdoll-sidecar.spec --noconfirm
@@ -66,10 +85,10 @@ jobs:
           echo "Placed sidecar → $DST"
 
       # ── Node / pnpm ──────────────────────────────────────────────────────────
-      - name: Set up Node.js 20
+      - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -120,5 +139,5 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
-          updaterJsonPath: latest.json
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
