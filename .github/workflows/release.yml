@@ -112,7 +112,8 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            libssl-dev
+            libssl-dev \
+            rpm
 
       # ── Build & publish ───────────────────────────────────────────────────────
       - name: Build and publish Tauri app
