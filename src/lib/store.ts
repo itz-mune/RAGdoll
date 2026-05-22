@@ -172,6 +172,7 @@ export interface AppSettings {
   messageDensity: 'comfortable' | 'compact';
   sendOnEnter: boolean;
   mdPreview: boolean;
+  closeToTray: boolean;
 }
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -180,6 +181,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   messageDensity: 'comfortable',
   sendOnEnter: true,
   mdPreview: true,
+  closeToTray: true,
 };
 
 export async function getAppSettings(): Promise<AppSettings> {

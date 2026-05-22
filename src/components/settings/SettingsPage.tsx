@@ -10,6 +10,7 @@ import { ModelProfilesSection } from './ModelProfilesSection';
 import { MemoryBrowser } from '@/components/memory/MemoryBrowser';
 import { chatStore } from '@/store/chatStore';
 import { getAppSettings, setAppSettings, type AppSettings } from '@/lib/store';
+import { tray } from '@/lib/tray';
 import { profileStore } from '@/store/profileStore';
 import { cn } from '@/lib/utils';
 import { ACCENT_PRESETS, setAccentPreset, setAccentFromHex, getAccentColor, hslToHex } from '@/lib/accent';
@@ -48,9 +49,12 @@ function GeneralSection() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [clearing, setClearing] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [autostart, setAutostart] = useState(false);
+  const [autostartLoading, setAutostartLoading] = useState(false);
 
   useEffect(() => {
     getAppSettings().then(setSettings);
+    tray.getAutostartEnabled().then(setAutostart).catch(() => {});
   }, []);
 
   const save = async (updates: Partial<AppSettings>) => {
@@ -164,6 +168,76 @@ function GeneralSection() {
             className={cn(
               'absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200',
               settings.mdPreview ? 'translate-x-5' : 'translate-x-0',
+            )}
+          />
+        </button>
+      </div>
+
+      {/* Minimize to tray on close */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Minimize to tray on close</label>
+        <p className="text-xs text-muted-foreground">
+          Clicking × hides RAGdoll to the system tray instead of quitting.
+        </p>
+        <button
+          onClick={async () => {
+            if (!settings) return;
+            const next = !settings.closeToTray;
+            await setAppSettings({ closeToTray: next });
+            setSettings((s) => s ? { ...s, closeToTray: next } : null);
+            await tray.setCloseToTray(next);
+            toast.success('Setting saved');
+          }}
+          role="switch"
+          aria-checked={settings?.closeToTray ?? true}
+          className={cn(
+            'relative h-6 w-11 rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            (settings?.closeToTray ?? true) ? 'bg-primary' : 'bg-muted-foreground/25',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200',
+              (settings?.closeToTray ?? true) ? 'translate-x-5' : 'translate-x-0',
+            )}
+          />
+        </button>
+      </div>
+
+      {/* Launch on startup */}
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Launch RAGdoll on system startup</label>
+        <p className="text-xs text-muted-foreground">
+          RAGdoll will start automatically when you log in.
+        </p>
+        <button
+          onClick={async () => {
+            if (autostartLoading) return;
+            setAutostartLoading(true);
+            try {
+              const next = !autostart;
+              await tray.setAutostartEnabled(next);
+              setAutostart(next);
+              toast.success(next ? 'RAGdoll will launch on startup' : 'Startup launch disabled');
+            } catch {
+              toast.error('Failed to update startup setting');
+            } finally {
+              setAutostartLoading(false);
+            }
+          }}
+          role="switch"
+          aria-checked={autostart}
+          disabled={autostartLoading}
+          className={cn(
+            'relative h-6 w-11 rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+            autostartLoading ? 'opacity-50 cursor-not-allowed' : '',
+            autostart ? 'bg-primary' : 'bg-muted-foreground/25',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200',
+              autostart ? 'translate-x-5' : 'translate-x-0',
             )}
           />
         </button>

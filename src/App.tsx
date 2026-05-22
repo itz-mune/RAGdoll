@@ -10,6 +10,7 @@ import { SettingsPage } from './components/settings/SettingsPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { profileStore } from './store/profileStore';
 import { chatStore } from './store/chatStore';
+import { tray } from './lib/tray';
 import './App.css';
 
 type AppView = 'shell' | 'settings';
@@ -45,6 +46,35 @@ function ErrorScreen() {
 export default function App() {
   useTauriOverrides();
   const { status, attempt, stageLabel } = useSidecarHealth();
+
+  // ── Tray event listeners ──────────────────────────────────────────────────
+  useEffect(() => {
+    const unsubs = [
+      tray.onNewChat(() => {
+        const profile = profileStore.getState().getActiveProfile();
+        const provider = profile?.provider ?? 'openai';
+        const model = profile?.modelName ?? 'gpt-4o';
+        fetch('http://127.0.0.1:8765/conversations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'New conversation', provider, model }),
+        })
+          .then((r) => r.json())
+          .then((conv) => {
+            chatStore.getState().createConversation(conv);
+            chatStore.getState().setActiveConversation(conv.id);
+            setView('shell');
+          })
+          .catch(console.error);
+      }),
+      // tray:quit is handled by std::process::exit on the Rust side;
+      // this handler exists for any frontend cleanup if needed in future.
+      tray.onQuit(() => {}),
+    ];
+    return () => {
+      unsubs.forEach((p) => p.then((u) => u()));
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [setupComplete, setSetupComplete] = useState(false);
   const [checkingSetup, setCheckingSetup] = useState(true);
   const [view, setView] = useState<AppView>('shell');
@@ -58,6 +88,16 @@ export default function App() {
         await profileStore.getState().loadProfiles();
         const ok = await hasValidSetup();
         setSetupComplete(ok);
+
+        // Sync persisted tray/profile settings into Rust state
+        const { getAppSettings } = await import('./lib/store');
+        const appSettings = await getAppSettings();
+        tray.setCloseToTray(appSettings.closeToTray).catch(() => {});
+
+        const activeProfile = profileStore.getState().getActiveProfile();
+        if (activeProfile) {
+          tray.updateTrayProfile(activeProfile.displayName).catch(() => {});
+        }
       } catch (err) {
         console.error('[App] Setup check failed:', err);
         setSetupComplete(false);

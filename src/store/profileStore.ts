@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ModelProfile } from '@/types/profile';
+import { tray } from '@/lib/tray';
 import {
   getProfiles,
   saveProfile,
@@ -93,6 +94,9 @@ export const profileStore = create<ProfileStoreState>((set, get) => ({
   async setActiveProfile(id) {
     await setActiveProfileId(id);
     set({ activeProfileId: id, switcherOpen: false });
+    // Keep tray menu label in sync — fire-and-forget, non-fatal
+    const profile = get().profiles.find((p) => p.id === id);
+    if (profile) tray.updateTrayProfile(profile.displayName).catch(() => {});
   },
 
   async setDefaultProfile(id) {
