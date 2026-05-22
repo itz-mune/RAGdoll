@@ -47,12 +47,21 @@ Download the latest installer for your platform from the [**Releases**](https://
 
 | Platform | File |
 |---|---|
-| **Windows** | `RAGdoll_x.x.x_x64-setup.exe` or `.msi` |
-| **macOS (Apple Silicon)** | `RAGdoll_x.x.x_aarch64.dmg` |
-| **macOS (Intel)** | `RAGdoll_x.x.x_x86_64.dmg` |
-| **Linux** | `RAGdoll_x.x.x_amd64.AppImage` or `.deb` |
+| **Windows** | `RAGdoll_0.1.0_x64-setup.exe` or `_x64_en-US.msi` |
+| **macOS (Apple Silicon)** | `RAGdoll_0.1.0_aarch64.dmg` |
+| **macOS (Intel)** | `RAGdoll_0.1.0_x86_64.dmg` |
+| **Linux** | `RAGdoll_0.1.0_amd64.AppImage` or `_amd64.deb` |
 
-> **macOS note:** If Gatekeeper blocks the app, right-click → Open on first launch.
+> **macOS:** If Gatekeeper blocks the app, right-click → Open on first launch.
+
+> **Windows:** RAGdoll requires [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). Windows 11 and Windows 10 (post-2021) already include it — the installer will download it automatically on older systems.
+
+> **Linux:** RAGdoll requires `libwebkit2gtk-4.1`. Install it with:
+> ```bash
+> sudo apt install libwebkit2gtk-4.1-0   # Ubuntu / Debian / Mint
+> sudo dnf install webkit2gtk4.1          # Fedora / RHEL
+> ```
+> Alternatively, use the `.AppImage` which bundles most dependencies.
 
 ---
 
