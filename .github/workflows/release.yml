@@ -37,6 +37,9 @@ jobs:
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             sidecar-ext: ''
+            # Skip RPM — xz-compressing a large binary takes hours on CI.
+            # AppImage + deb cover the vast majority of Linux users.
+            extra-args: '--bundles deb,appimage'
 
     steps:
       # ── Checkout ─────────────────────────────────────────────────────────────
@@ -132,6 +135,6 @@ jobs:
             > **Existing install?** RAGdoll will prompt you to update automatically.
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} ${{ matrix.extra-args }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
