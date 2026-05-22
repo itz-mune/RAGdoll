@@ -62,14 +62,7 @@ jobs:
       # CArchive limit. The model (~25 MB quantized) is tiny by comparison.
       - name: Pre-export ONNX embedding model
         working-directory: sidecar
-        run: >
-          uv run python -c "
-          import sys, os; sys.path.insert(0, '.');
-          os.environ['HF_HUB_DISABLE_IMPLICIT_TOKEN'] = '1';
-          from memory.embedder import _ONNX_DIR, _export_onnx;
-          (_export_onnx() if not _ONNX_DIR.exists()
-           else print('[CI] ONNX model already present at', _ONNX_DIR))
-          "
+        run: uv run python export_onnx_model.py
 
       - name: Build sidecar with PyInstaller
         working-directory: sidecar
