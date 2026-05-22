@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
+import { AnimatePresence } from 'framer-motion';
 import { useSidecarHealth } from './hooks/useSidecarHealth';
 import { useTauriOverrides } from './hooks/useTauriOverrides';
+import { useUpdater } from './hooks/useUpdater';
 import { AppContextMenu } from './components/ui/AppContextMenu';
+import { UpdateBanner } from './components/updater/UpdateBanner';
 import { hasValidSetup } from './lib/store';
 import { FirstRunSetup } from './components/settings/FirstRunSetup';
 import { AppShell } from './components/layout/AppShell';
@@ -46,6 +49,7 @@ function ErrorScreen() {
 export default function App() {
   useTauriOverrides();
   const { status, attempt, stageLabel } = useSidecarHealth();
+  const updater = useUpdater();
 
   // ── Tray event listeners ──────────────────────────────────────────────────
   useEffect(() => {
@@ -196,6 +200,10 @@ export default function App() {
           },
         }}
       />
+      {/* Update banner — fixed top overlay, slides in when a new version is ready */}
+      <AnimatePresence>
+        {updater.available && <UpdateBanner key="update-banner" updater={updater} />}
+      </AnimatePresence>
       <ErrorBoundary>
         <AppShell
           onOpenSettings={() => setView('settings')}

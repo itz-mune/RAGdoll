@@ -17,6 +17,8 @@ pub struct ActiveProfileState(pub Mutex<String>);
 
 // ── Sidecar spawn ─────────────────────────────────────────────────────────────
 
+/// Dev build: run directly via `uv run python main.py` from the workspace.
+#[cfg(debug_assertions)]
 fn spawn_sidecar() -> Option<Child> {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let sidecar_dir = manifest_dir.parent()?.join("sidecar");
@@ -26,6 +28,28 @@ fn spawn_sidecar() -> Option<Child> {
         .current_dir(&sidecar_dir)
         .spawn()
         .inspect_err(|e| eprintln!("[RAGdoll] Failed to spawn sidecar: {e}"))
+        .ok()
+}
+
+/// Release build: launch the bundled PyInstaller binary placed beside the exe.
+#[cfg(not(debug_assertions))]
+fn spawn_sidecar() -> Option<Child> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let binary = if cfg!(target_os = "windows") {
+        dir.join("ragdoll-sidecar.exe")
+    } else {
+        dir.join("ragdoll-sidecar")
+    };
+
+    Command::new(&binary)
+        .spawn()
+        .inspect_err(|e| {
+            eprintln!(
+                "[RAGdoll] Failed to spawn bundled sidecar at {}: {e}",
+                binary.display()
+            )
+        })
         .ok()
 }
 
@@ -81,6 +105,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(SidecarHandle(Mutex::new(None)))
         .manage(CloseToTrayState(Mutex::new(true)))
         .manage(ActiveProfileState(Mutex::new(

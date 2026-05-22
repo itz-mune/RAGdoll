@@ -1,0 +1,69 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+jobs:
+  # ── TypeScript type-check ───────────────────────────────────────────────────
+  frontend:
+    name: Frontend · type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript type-check
+        run: pnpm tsc --noEmit
+
+  # ── Rust clippy ─────────────────────────────────────────────────────────────
+  rust:
+    name: Rust · clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Set up Rust (stable + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust build artefacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # Stub binary so tauri-build doesn't abort on missing externalBin
+      - name: Create stub sidecar binary
+        run: |
+          mkdir -p src-tauri/binaries
+          touch src-tauri/binaries/ragdoll-sidecar-x86_64-unknown-linux-gnu
+          chmod +x src-tauri/binaries/ragdoll-sidecar-x86_64-unknown-linux-gnu
+
+      - name: Clippy (deny warnings)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings

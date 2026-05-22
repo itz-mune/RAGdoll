@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { MainLogo } from '@/components/ui/MainLogo';
 import {
   ArrowLeft, Settings, Cpu, Brain, Palette, Keyboard, Info,
-  Trash2, Download, Sun, Moon, Monitor, RefreshCw, X,
+  Trash2, Download, Sun, Moon, Monitor, RefreshCw, X, CheckCircle2, AlertCircle,
 } from 'lucide-react';
+import { AnimatePresence as AP } from 'framer-motion';
+import { UpdateModal } from '@/components/updater/UpdateModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { ModelProfilesSection } from './ModelProfilesSection';
@@ -642,6 +644,59 @@ function ShortcutsSection() {
 }
 
 function AboutSection() {
+  const [checking, setChecking] = useState(false);
+  const [checkStatus, setCheckStatus] = useState<'idle' | 'up-to-date' | 'available' | 'error'>('idle');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [pendingUpdate, setPendingUpdate] = useState<any>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const handleCheckUpdates = async () => {
+    setChecking(true);
+    setCheckStatus('idle');
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (update?.available) {
+        setCheckStatus('available');
+        setPendingUpdate(update);
+        setModalOpen(true);
+      } else {
+        setCheckStatus('up-to-date');
+      }
+    } catch {
+      setCheckStatus('error');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  // Thin updater shim so UpdateModal can call install/dismiss
+  const updaterShim = {
+    available: !!pendingUpdate,
+    info: pendingUpdate
+      ? { version: pendingUpdate.version, body: pendingUpdate.body ?? null, date: pendingUpdate.date ?? null }
+      : null,
+    downloading: false,
+    progress: 0,
+    error: null,
+    install: async () => {
+      if (!pendingUpdate) return;
+      let downloaded = 0, total = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await pendingUpdate.downloadAndInstall((ev: any) => {
+        if (ev.event === 'Started') total = ev.data?.contentLength ?? 0;
+        else if (ev.event === 'Progress') {
+          downloaded += ev.data?.chunkLength ?? 0;
+          if (total > 0) updaterShim.progress = Math.round((downloaded / total) * 100);
+        }
+      });
+      const { relaunch } = await import('@tauri-apps/plugin-process');
+      await relaunch();
+    },
+    dismiss: () => { setModalOpen(false); setPendingUpdate(null); },
+    recheck: handleCheckUpdates,
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div>
@@ -655,7 +710,9 @@ function AboutSection() {
           </div>
           <div>
             <p className="font-semibold text-foreground">RAGdoll</p>
-            <p className="text-xs text-muted-foreground">Version 0.1.0 · Local-First RAG Intelligence</p>
+            <p className="text-xs text-muted-foreground">
+              Version {__APP_VERSION__} · built {__BUILD_DATE__} · Local-First RAG Intelligence
+            </p>
           </div>
         </div>
 
@@ -673,12 +730,44 @@ function AboutSection() {
           github.com/itz-mune/RAGdoll →
         </a>
 
-        <div className="border-t border-border/50 pt-4 flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" disabled className="gap-1.5 opacity-50">
-            Check for updates (coming soon)
+        <div className="border-t border-border/50 pt-4 flex flex-wrap items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCheckUpdates}
+            disabled={checking}
+            className="gap-1.5"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', checking && 'animate-spin')} />
+            {checking ? 'Checking…' : 'Check for updates'}
           </Button>
+
+          {checkStatus === 'up-to-date' && (
+            <span className="flex items-center gap-1 text-xs text-green-500">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              You're on the latest version
+            </span>
+          )}
+          {checkStatus === 'available' && (
+            <span className="flex items-center gap-1 text-xs text-primary">
+              <Download className="h-3.5 w-3.5" />
+              {pendingUpdate?.version} is available
+            </span>
+          )}
+          {checkStatus === 'error' && (
+            <span className="flex items-center gap-1 text-xs text-destructive">
+              <AlertCircle className="h-3.5 w-3.5" />
+              Update check failed
+            </span>
+          )}
         </div>
       </div>
+
+      <AP>
+        {modalOpen && (
+          <UpdateModal updater={updaterShim as any} onClose={() => setModalOpen(false)} />
+        )}
+      </AP>
     </div>
   );
 }

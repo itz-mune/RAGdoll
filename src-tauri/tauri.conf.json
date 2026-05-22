@@ -39,6 +39,22 @@
     "resources": [
       "../ragdoll.config.json",
       "../public/dictionaries/*"
-    ]
+    ],
+    "externalBin": [
+      "binaries/ragdoll-sidecar"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_GENERATED_PUBKEY",
+      "endpoints": [
+        "https://github.com/itz-mune/RAGdoll/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

@@ -1,0 +1,12 @@
+# Real sidecar binaries are built by CI (see .github/workflows/release.yml).
+# Only the stub files used for local dev cargo builds live here in git.
+# Stubs are overwritten by CI with the real PyInstaller output before bundling.
+
+# Ignore real (non-zero) binaries — keep .gitkeep and stub files
+*.exe
+*-x86_64-apple-darwin
+*-aarch64-apple-darwin
+*-x86_64-unknown-linux-gnu
+*-aarch64-unknown-linux-gnu
+# Re-include the Windows dev stub (needed so tauri-build doesn't abort on dev machines)
+!ragdoll-sidecar-x86_64-pc-windows-msvc.exe

@@ -40,6 +40,12 @@ export default defineConfig({
     },
   },
 
+  define: {
+    // Injected at build time — available as globals in TS via vite-env.d.ts
+    __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.1.0'),
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString().split('T')[0]),
+  },
+
   optimizeDeps: {
     // Force esbuild to pre-bundle these packages before the browser even loads.
     // Without this, Vite discovers them mid-load → triggers a dep re-optimisation
