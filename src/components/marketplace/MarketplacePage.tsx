@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
-import { Search, RefreshCw, Download, Check, ToggleLeft, ToggleRight, Trash2, Palette, AlertCircle, RefreshCcw } from 'lucide-react';
+import { Search, RefreshCw, Download, Check, ToggleLeft, ToggleRight, Trash2, Palette, AlertCircle, RefreshCcw, Settings } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useMarketplace, type RegistryPlugin, type InstalledPlugin } from '@/hooks/useMarketplace';
 import { PluginDetailPage } from './PluginDetailPage';
 import { PluginLogo } from './PluginLogo';
+import { PluginSettingsDrawer } from './PluginSettingsDrawer';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ export function MarketplacePage() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<Category>('all');
   const [detailPlugin, setDetailPlugin] = useState<RegistryPlugin | null>(null);
+  const [settingsPlugin, setSettingsPlugin] = useState<InstalledPlugin | null>(null);
 
   const installedMap = useMemo(
     () => Object.fromEntries(marketplace.installed.map((p) => [p.id, p])),
@@ -152,6 +154,13 @@ export function MarketplacePage() {
         </div>
       )}
 
+      {/* Plugin settings drawer */}
+      <PluginSettingsDrawer
+        plugin={settingsPlugin}
+        open={!!settingsPlugin}
+        onClose={() => setSettingsPlugin(null)}
+      />
+
       <div className="flex-1 overflow-y-auto">
         <AnimatePresence mode="wait" initial={false}>
 
@@ -221,6 +230,7 @@ export function MarketplacePage() {
                     onUninstall={() => marketplace.uninstallPlugin(plugin.id)}
                     onActivateStyle={() => marketplace.activateStyle(plugin.id)}
                     onClearStyle={marketplace.clearStyle}
+                    onOpenSettings={() => setSettingsPlugin(plugin)}
                     onUpdate={() => {
                       const reg = marketplace.registry.find((r) => r.id === plugin.id);
                       if (reg) marketplace.updatePlugin(reg);
@@ -334,11 +344,11 @@ function PluginCard({ plugin, isInstalled, hasUpdate, installing, updating, onIn
 // ── Installed row ─────────────────────────────────────────────────────────────
 
 function InstalledRow({ plugin, activeStyle, hasUpdate, updating, registryPlugin,
-  onEnable, onDisable, onUninstall, onActivateStyle, onClearStyle, onUpdate, onViewDetail }: {
+  onEnable, onDisable, onUninstall, onActivateStyle, onClearStyle, onOpenSettings, onUpdate, onViewDetail }: {
   plugin: InstalledPlugin; activeStyle: string | null; hasUpdate: boolean;
   updating: boolean; registryPlugin?: RegistryPlugin;
   onEnable: () => void; onDisable: () => void; onUninstall: () => void;
-  onActivateStyle: () => void; onClearStyle: () => void;
+  onActivateStyle: () => void; onClearStyle: () => void; onOpenSettings: () => void;
   onUpdate: () => void; onViewDetail: () => void;
 }) {
   const isStyle = plugin.category === 'style';
@@ -382,6 +392,17 @@ function InstalledRow({ plugin, activeStyle, hasUpdate, updating, registryPlugin
             isActiveStyle ? 'bg-purple-500/20 text-purple-400' : 'bg-muted text-muted-foreground hover:bg-muted/80')}>
           <Palette className="h-3 w-3" />
           {isActiveStyle ? 'Active' : 'Set active'}
+        </button>
+      )}
+
+      {/* Gear icon — only shown when plugin has config_fields */}
+      {(plugin.config_fields?.length ?? 0) > 0 && (
+        <button
+          onClick={onOpenSettings}
+          className="shrink-0 rounded p-0.5 text-muted-foreground/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+          title="Plugin settings"
+        >
+          <Settings className="h-3.5 w-3.5" />
         </button>
       )}
 

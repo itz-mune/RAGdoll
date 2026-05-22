@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { subscribeWithSelector } from 'zustand/middleware';
+import { subscribeWithSelector, persist } from 'zustand/middleware';
 
 export type Provider = 'openai' | 'anthropic' | 'groq' | 'google' | 'ollama' | 'huggingface' | 'openrouter';
 export type MessageRole = 'user' | 'assistant' | 'system';
@@ -46,9 +46,13 @@ interface ChatStore {
   messages: Record<string, Message[]>;
   isStreaming: boolean;
   streamingMessageId: string | null;
+  targetMessageId: string | null;
+  pluginVersion: number;
 
   // Actions
   setConversations: (conversations: Conversation[]) => void;
+  bumpPluginVersion: () => void;
+  setTargetMessageId: (id: string | null) => void;
   createConversation: (conversation: Conversation) => void;
   deleteConversation: (id: string) => void;
   setActiveConversation: (id: string | null) => void;
@@ -68,14 +72,20 @@ interface ChatStore {
 }
 
 export const useChatStore = create<ChatStore>()(
-  subscribeWithSelector((set) => ({
+  subscribeWithSelector(
+  persist(
+  (set) => ({
     conversations: [],
     activeConversationId: null,
     messages: {},
     isStreaming: false,
     streamingMessageId: null,
+    targetMessageId: null,
+    pluginVersion: 0,
 
     setConversations: (conversations) => set({ conversations }),
+    bumpPluginVersion: () => set((state) => ({ pluginVersion: state.pluginVersion + 1 })),
+    setTargetMessageId: (id) => set({ targetMessageId: id }),
 
     createConversation: (conversation) =>
       set((state) => ({
@@ -238,7 +248,13 @@ export const useChatStore = create<ChatStore>()(
           },
         };
       }),
-  }))
+  }),
+  {
+    name: 'ragdoll-chat-ui',
+    partialize: (s) => ({ activeConversationId: s.activeConversationId }),
+  }
+  )
+  )
 );
 
 // Convenience alias so components can import either name

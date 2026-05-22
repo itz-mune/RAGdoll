@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Toaster } from 'sonner';
 import { useSidecarHealth } from './hooks/useSidecarHealth';
+import { useTauriOverrides } from './hooks/useTauriOverrides';
+import { AppContextMenu } from './components/ui/AppContextMenu';
 import { hasValidSetup } from './lib/store';
 import { FirstRunSetup } from './components/settings/FirstRunSetup';
 import { AppShell } from './components/layout/AppShell';
@@ -9,16 +12,16 @@ import { profileStore } from './store/profileStore';
 import { chatStore } from './store/chatStore';
 import './App.css';
 
-type AppView = 'chat' | 'settings';
+type AppView = 'shell' | 'settings';
 
 // ── Screens ──────────────────────────────────────────────────────────────────
 
-function SplashScreen({ attempt }: { attempt: number }) {
+function SplashScreen({ attempt, stageLabel }: { attempt: number; stageLabel: string }) {
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
       <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary" />
       <p className="text-sm text-muted-foreground">
-        {attempt > 0 ? `Connecting to sidecar (${attempt})…` : 'Starting sidecar…'}
+        {stageLabel !== 'Starting…' ? stageLabel : attempt > 0 ? `Connecting (${attempt})…` : 'Starting sidecar…'}
       </p>
     </div>
   );
@@ -40,10 +43,11 @@ function ErrorScreen() {
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const { status, attempt } = useSidecarHealth();
+  useTauriOverrides();
+  const { status, attempt, stageLabel } = useSidecarHealth();
   const [setupComplete, setSetupComplete] = useState(false);
   const [checkingSetup, setCheckingSetup] = useState(true);
-  const [view, setView] = useState<AppView>('chat');
+  const [view, setView] = useState<AppView>('shell');
   const [openMemoryOnChat, setOpenMemoryOnChat] = useState(false);
 
   // ── Check for existing setup after sidecar is ready ──────────────────────
@@ -72,13 +76,11 @@ export default function App() {
 
       if (mod && e.key === ',') {
         e.preventDefault();
-        setView((v) => (v === 'settings' ? 'chat' : 'settings'));
+        setView((v) => (v === 'settings' ? 'shell' : 'settings'));
       }
 
       if (mod && e.key === 'n') {
         e.preventDefault();
-        // Delegate new-chat creation to Sidebar's handler via programmatic click,
-        // or recreate the logic here using the store.
         const profile = profileStore.getState().getActiveProfile();
         const provider = profile?.provider ?? 'openai';
         const model = profile?.modelName ?? 'gpt-4o';
@@ -91,19 +93,19 @@ export default function App() {
           .then((conv) => {
             chatStore.getState().createConversation(conv);
             chatStore.getState().setActiveConversation(conv.id);
-            if (view === 'settings') setView('chat');
+            setView('shell');
           })
           .catch(console.error);
       }
 
       if (mod && e.key === 'p') {
         e.preventDefault();
-        if (view === 'chat') profileStore.getState().openSwitcher();
+        if (view === 'shell') profileStore.getState().openSwitcher();
       }
 
       if (e.key === 'Escape') {
         profileStore.getState().closeSwitcher();
-        if (view === 'settings') setView('chat');
+        if (view === 'settings') setView('shell');
       }
     };
 
@@ -112,9 +114,9 @@ export default function App() {
   }, [setupComplete, view]);
 
   // ── Guard states ─────────────────────────────────────────────────────────
-  if (status === 'connecting') return <SplashScreen attempt={attempt} />;
+  if (status === 'connecting') return <SplashScreen attempt={attempt} stageLabel={stageLabel} />;
   if (status === 'error') return <ErrorScreen />;
-  if (checkingSetup) return <SplashScreen attempt={attempt} />;
+  if (checkingSetup) return <SplashScreen attempt={attempt} stageLabel={stageLabel} />;
 
   if (!setupComplete) {
     return (
@@ -122,7 +124,7 @@ export default function App() {
         <FirstRunSetup
           onComplete={() => {
             setSetupComplete(true);
-            setView('chat');
+            setView('shell');
           }}
         />
       </ErrorBoundary>
@@ -133,20 +135,34 @@ export default function App() {
     return (
       <ErrorBoundary>
         <SettingsPage
-          onBack={() => setView('chat')}
-          onOpenMemoryBrowser={() => { setOpenMemoryOnChat(true); setView('chat'); }}
+          onBack={() => setView('shell')}
+          onOpenMemoryBrowser={() => { setOpenMemoryOnChat(true); setView('shell'); }}
         />
       </ErrorBoundary>
     );
   }
 
   return (
-    <ErrorBoundary>
-      <AppShell
-        onOpenSettings={() => setView('settings')}
-        defaultMemoryBrowserOpen={openMemoryOnChat}
-        onMemoryBrowserOpened={() => setOpenMemoryOnChat(false)}
+    <>
+      <AppContextMenu />
+      <Toaster
+        position="bottom-right"
+        toastOptions={{
+          duration: 3000,
+          classNames: {
+            toast: 'glass border border-border/60 text-foreground text-sm',
+            title: 'font-medium',
+            description: 'text-muted-foreground text-xs',
+          },
+        }}
       />
-    </ErrorBoundary>
+      <ErrorBoundary>
+        <AppShell
+          onOpenSettings={() => setView('settings')}
+          defaultMemoryBrowserOpen={openMemoryOnChat}
+          onMemoryBrowserOpened={() => setOpenMemoryOnChat(false)}
+        />
+      </ErrorBoundary>
+    </>
   );
 }

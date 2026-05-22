@@ -4,10 +4,12 @@ import { profileStore, getProfileApiKey } from '@/store/profileStore';
 import type { AttachedFile, ResponseStyle } from '@/types/chat';
 
 const SIDECAR_URL = 'http://127.0.0.1:8765';
+const PREFETCH_DEBOUNCE_MS = 400;
 
 interface UseChatReturn {
   sendMessage: (content: string, files?: AttachedFile[], responseStyle?: ResponseStyle | null) => Promise<void>;
   stopGeneration: () => void;
+  prefetchContext: (query: string) => void;
   isStreaming: boolean;
   error: string | null;
 }
@@ -39,12 +41,47 @@ function buildFileContext(processed: { filename: string; content: string; error:
   return `The user has attached the following documents:\n\n${parts.join('\n\n---\n\n')}`;
 }
 
+// ── SSE event type ────────────────────────────────────────────────────────────
+
+interface SseEvent {
+  // Compact chunk format
+  t?: string;
+  d?: string;
+  // Verbose format (all other events)
+  type?: string;
+  content?: string;
+  chunks?: MemoryChunk[];
+  citations?: string[];
+  title?: string;
+  messageId?: string;
+  message?: string;
+  tools?: string[];
+  plugin_name?: string;
+  plugin_id?: string;
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useChat(): UseChatReturn {
   const abortControllerRef = useRef<AbortController | null>(null);
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isStreaming = chatStore((state) => state.isStreaming);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Pre-fetch ─────────────────────────────────────────────────────────────
+
+  const prefetchContext = useCallback((query: string) => {
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+    const trimmed = query.trim();
+    if (trimmed.length < 8) return;
+    prefetchTimerRef.current = setTimeout(() => {
+      fetch(`${SIDECAR_URL}/memory/prefetch?q=${encodeURIComponent(trimmed)}`, {
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => {});
+    }, PREFETCH_DEBOUNCE_MS);
+  }, []);
+
+  // ── Send ──────────────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(async (
     content: string,
@@ -60,13 +97,17 @@ export function useChat(): UseChatReturn {
 
     setError(null);
 
-    // Resolve provider + model + API key from active profile (fall back to conversation)
+    // Cancel any pending prefetch debounce
+    if (prefetchTimerRef.current) {
+      clearTimeout(prefetchTimerRef.current);
+      prefetchTimerRef.current = null;
+    }
+
     const profile = profileStore.getState().getActiveProfile();
     const provider = profile?.provider ?? conversation.provider;
     const model = profile?.modelName ?? conversation.model;
     const apiKey = profile ? (await getProfileApiKey(profile.id)) ?? '' : '';
 
-    // ── Process attached files ─────────────────────────────────────────────
     let fileContext = '';
     const fileNames = files.map((f) => f.name);
     if (files.length > 0) {
@@ -78,15 +119,13 @@ export function useChat(): UseChatReturn {
       }
     }
 
-    // ── Final user message text ────────────────────────────────────────────
     const messageText = fileContext ? `${fileContext}\n\n${content}`.trim() : content;
 
-    // ── Optimistic user message ────────────────────────────────────────────
     const userMessage: Message = {
       id: `msg_${Date.now()}_user`,
       conversationId: activeConversationId,
       role: 'user',
-      content, // show only the user's text in the bubble, not the full context
+      content,
       createdAt: Date.now(),
       isStreaming: false,
       memoryChunks: null,
@@ -94,7 +133,6 @@ export function useChat(): UseChatReturn {
     };
     chatStore.getState().addMessage(activeConversationId, userMessage);
 
-    // ── Streaming placeholder ──────────────────────────────────────────────
     const streamingMessageId = `msg_${Date.now()}_stream`;
     const streamingMessage: Message = {
       id: streamingMessageId,
@@ -130,10 +168,29 @@ export function useChat(): UseChatReturn {
 
       if (!response.ok) throw new Error(`Stream failed: ${response.status} ${response.statusText}`);
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body from sidecar');
+      // ── rAF-batched chunk accumulator ────────────────────────────────────
+      let pendingChunks: string[] = [];
+      let rafId: number | null = null;
 
-      const decoder = new TextDecoder();
+      function flushChunks() {
+        rafId = null;
+        if (pendingChunks.length === 0) return;
+        const combined = pendingChunks.join('');
+        pendingChunks = [];
+        chatStore.getState().appendToStreamingMessage(streamingMessageId, combined);
+      }
+
+      function scheduleFlush() {
+        if (rafId === null) {
+          rafId = requestAnimationFrame(flushChunks);
+        }
+      }
+
+      // ── TextDecoderStream ─────────────────────────────────────────────────
+      const reader = response.body!
+        .pipeThrough(new TextDecoderStream())
+        .getReader();
+
       let buffer = '';
       let pendingMemoryChunks: MemoryChunk[] | null = null;
       let pendingCitations: string[] | null = null;
@@ -143,7 +200,7 @@ export function useChat(): UseChatReturn {
         const { done, value } = await reader.read();
         if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        buffer += value;
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
 
@@ -153,45 +210,57 @@ export function useChat(): UseChatReturn {
           if (!jsonStr) continue;
 
           try {
-            const event = JSON.parse(jsonStr) as {
-              type: string;
-              content?: string;
-              chunks?: MemoryChunk[];
-              citations?: string[];
-              title?: string;
-              messageId?: string;
-              message?: string;
-            };
+            const event = JSON.parse(jsonStr) as SseEvent;
 
-            if (event.type === 'tool_use') {
+            // Compact chunk format: {"t":"c","d":"..."}
+            if (event.t === 'c') {
+              pendingChunks.push(event.d ?? '');
+              scheduleFlush();
+              continue;
+            }
+
+            const evType = event.type;
+
+            if (evType === 'tool_use') {
               chatStore.getState().setToolCallsUsed(streamingMessageId, event.tools ?? []);
-            } else if (event.type === 'plugin_install') {
+            } else if (evType === 'plugin_install') {
               chatStore.getState().setInstallingPlugin(streamingMessageId, {
                 name: event.plugin_name ?? event.plugin_id ?? 'Plugin',
                 id: event.plugin_id ?? '',
               });
-            } else if (event.type === 'chunk') {
-              chatStore.getState().appendToStreamingMessage(streamingMessageId, event.content ?? '');
-            } else if (event.type === 'thinking') {
+            } else if (evType === 'chunk') {
+              // Verbose chunk fallback
+              pendingChunks.push(event.content ?? '');
+              scheduleFlush();
+            } else if (evType === 'thinking') {
               thinkingStartTime ??= Date.now();
               chatStore.getState().setThinkingContent(streamingMessageId, event.content ?? '');
-            } else if (event.type === 'thinking_done') {
+            } else if (evType === 'thinking_done') {
               if (thinkingStartTime) {
                 chatStore.getState().finalizeThinking(streamingMessageId, (Date.now() - thinkingStartTime) / 1000);
               }
-            } else if (event.type === 'memory') {
+            } else if (evType === 'memory') {
               pendingMemoryChunks = event.chunks ?? null;
-            } else if (event.type === 'citations') {
+            } else if (evType === 'citations') {
               pendingCitations = event.citations ?? null;
-            } else if (event.type === 'title') {
+            } else if (evType === 'title') {
               chatStore.getState().updateConversationTitle(activeConversationId, event.title ?? '');
-            } else if (event.type === 'done') {
+            } else if (evType === 'done') {
+              // Flush any buffered chunks before finalizing
+              if (rafId !== null) cancelAnimationFrame(rafId);
+              flushChunks();
+              // Sync plugin picker if a plugin was installed or activated this turn
+              const _msgs = chatStore.getState().messages[activeConversationId] ?? [];
+              const _sm = _msgs.find((m) => m.id === streamingMessageId);
+              const _pluginTools = ['install_skill', 'install_and_activate_style'];
+              if (_sm?.installingPlugin || _sm?.toolCallsUsed?.some((t) => _pluginTools.includes(t))) {
+                chatStore.getState().bumpPluginVersion();
+              }
               chatStore.getState().finalizeStreamingMessage(streamingMessageId, pendingMemoryChunks, pendingCitations);
-            } else if (event.type === 'error') {
+            } else if (evType === 'error') {
               throw new Error(event.message ?? 'Unknown sidecar error');
             }
           } catch (parseErr) {
-            // Re-throw real errors; silently drop malformed SSE lines
             if (parseErr instanceof Error && parseErr.message !== 'Unexpected token') {
               throw parseErr;
             }
@@ -202,7 +271,6 @@ export function useChat(): UseChatReturn {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg !== 'The user aborted a request.') {
         setError(msg);
-        // Finalize the placeholder so the UI doesn't stay in streaming state
         const msgs = chatStore.getState().messages[activeConversationId] ?? [];
         const streaming = msgs.find((m) => m.isStreaming);
         if (streaming) chatStore.getState().finalizeStreamingMessage(streaming.id, null);
@@ -226,5 +294,5 @@ export function useChat(): UseChatReturn {
     chatStore.getState().setStreaming(false);
   }, []);
 
-  return { sendMessage, stopGeneration, isStreaming, error };
+  return { sendMessage, stopGeneration, prefetchContext, isStreaming, error };
 }

@@ -37,6 +37,8 @@ class MessageModel(SQLModel, table=True):
     display_content: Optional[str] = Field(default=None)
     attached_file_names: Optional[str] = Field(default=None)  # JSON array string
     tool_calls_made: Optional[str] = Field(default=None)      # JSON array string
+    tokens_used: Optional[int] = Field(default=None)          # prompt+completion tokens
+    response_time_ms: Optional[int] = Field(default=None)     # wall-clock ms for this response
 
 
 class ConversationSummary(SQLModel, table=True):
@@ -63,6 +65,8 @@ def init_db() -> None:
             "ALTER TABLE messages ADD COLUMN display_content TEXT",
             "ALTER TABLE messages ADD COLUMN attached_file_names TEXT",
             "ALTER TABLE messages ADD COLUMN tool_calls_made TEXT",
+            "ALTER TABLE messages ADD COLUMN tokens_used INTEGER",
+            "ALTER TABLE messages ADD COLUMN response_time_ms INTEGER",
         ]:
             try:
                 session.exec(text(stmt))

@@ -4,6 +4,62 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ── Accent Color System ──────────────────────────────────────────────────── */
+:root {
+  --accent-h: 258;
+  --accent-s: 90%;
+  --accent-l: 60%;
+  --accent:    hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+  --accent-60: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.6);
+  --accent-40: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.4);
+  --accent-20: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.2);
+  --accent-15: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.15);
+  --accent-10: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 0.1);
+  --accent-foreground-on-accent: #ffffff;
+  --glass-bg:     hsl(var(--accent-h) 20% 96% / 0.60);
+  --glass-border: hsl(var(--accent-h) 30% 75% / 0.25);
+  --glass-shadow: 0 8px 32px hsl(var(--accent-h) 30% 20% / 0.10);
+}
+.dark {
+  --glass-bg:     hsl(var(--accent-h) 15% 9% / 0.72);
+  --glass-border: hsl(var(--accent-h) 25% 55% / 0.18);
+  --glass-shadow: 0 8px 32px hsl(0 0% 0% / 0.45);
+}
+
+/*
+ * Inline SVG fractal-noise grain texture — URL-encoded so it works in CSS url().
+ * Used as a second background-image layer on top of glass-bg to mimic the
+ * micro-texture of real etched/frosted glass.
+ */
+.glass,
+.glass-subtle {
+  --glass-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.80' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.048'/%3E%3C/svg%3E");
+}
+
+/* ── Frosted Glass Utilities ──────────────────────────────────────────────── */
+.glass {
+  background-color: var(--glass-bg);
+  background-image: var(--glass-noise);
+  background-size: 180px 180px;
+  border: 1px solid var(--glass-border);
+  /* Top-edge highlight — simulates light catching frosted glass at an angle */
+  box-shadow:
+    var(--glass-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(22px) saturate(190%) brightness(1.04);
+  -webkit-backdrop-filter: blur(22px) saturate(190%) brightness(1.04);
+}
+.glass-subtle {
+  background-color: var(--glass-bg);
+  background-image: var(--glass-noise);
+  background-size: 180px 180px;
+  /* Softer version: less blur, same grain */
+  backdrop-filter: blur(14px) saturate(160%) brightness(1.02);
+  -webkit-backdrop-filter: blur(14px) saturate(160%) brightness(1.02);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+
 @keyframes tool-shimmer {
   0%   { background-position: 200% center; }
   100% { background-position: -200% center; }
@@ -11,6 +67,31 @@
 
 @utility animate-tool-shimmer {
   animation: tool-shimmer 2s linear infinite;
+}
+
+/* ── recharts: kill the default white plot-area background ───────────────── */
+/*
+ * recharts v3 renders a <rect> as the very first child of the SVG to act as
+ * a background fill. We target it with the :first-child selector and force
+ * it transparent so the card's dark bg shows through.
+ * We also reset .recharts-wrapper and .recharts-surface backgrounds.
+ */
+.recharts-wrapper,
+.recharts-surface {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* The background rect recharts injects as first SVG child */
+.recharts-surface > rect:first-child {
+  fill: transparent !important;
+}
+/* Bar chart background rectangles (shown when background prop is truthy) */
+.recharts-bar-background-rectangle {
+  fill: transparent !important;
+}
+/* Cursor rectangle on hover — use a very faint white instead of dark */
+.recharts-rectangle.recharts-cursor {
+  fill: rgba(255, 255, 255, 0.05) !important;
 }
 
 @layer base {

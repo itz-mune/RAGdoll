@@ -1,4 +1,4 @@
-"""Vector store for RAGdoll memory — LanceDB + all-MiniLM-L6-v2."""
+"""Vector store for RAGdoll memory — LanceDB + ONNX/SentenceTransformer embedder."""
 from __future__ import annotations
 
 import hashlib
@@ -17,19 +17,25 @@ EMBED_DIM = 384
 SEMANTIC_TABLE = "semantic_memory"
 DOCUMENT_TABLE = "document_memory"
 
+# IVF-PQ index: create when row count ≥ this, rebuild every N writes
+_IVF_MIN_ROWS = 256
+_IVF_REBUILD_EVERY = 100
+_sem_write_count = 0
+_doc_write_count = 0
+_sem_index_exists = False
+_doc_index_exists = False
+
 # ── Singletons ────────────────────────────────────────────────────────────────
-_model = None
 _db = None
 _sem_table = None
 _doc_table = None
 
 
 def get_embed_model():
-    global _model
-    if _model is None:
-        from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _model
+    """Legacy shim — callers that held a reference still work."""
+    from memory.embedder import _load, _fallback, _session
+    _load()
+    return _fallback  # may be None when ONNX is active; callers should use embed() directly
 
 
 def _db_path() -> str:
@@ -120,14 +126,67 @@ class MemoryChunk:
 # ── Embedding ─────────────────────────────────────────────────────────────────
 
 def embed(texts: list[str]) -> list[list[float]]:
-    model = get_embed_model()
-    vecs = model.encode(texts, batch_size=32, show_progress_bar=False, normalize_embeddings=True)
-    return vecs.tolist()
+    from memory.embedder import embed as _embed
+    return _embed(texts)
 
 
 def _dist_to_sim(l2_dist: float) -> float:
     """L2 distance of unit-norm vectors → cosine similarity."""
     return max(0.0, 1.0 - (l2_dist ** 2) / 2.0)
+
+
+# ── IVF-PQ index management ───────────────────────────────────────────────────
+
+def _try_create_index(table, table_name: str) -> bool:
+    """Create or rebuild an IVF-PQ index. Returns True on success."""
+    try:
+        num_rows = table.count_rows()
+        if num_rows < _IVF_MIN_ROWS:
+            return False
+        num_partitions = max(1, int(num_rows ** 0.5))
+        table.create_index(
+            vector_column_name="vector",
+            index_type="IVF_PQ",
+            num_partitions=num_partitions,
+            num_sub_vectors=48,  # 384 dims / 8
+            replace=True,
+        )
+        print(f"[VectorStore] IVF-PQ index built for {table_name} (rows={num_rows}, parts={num_partitions})")
+        return True
+    except Exception as exc:
+        print(f"[VectorStore] Index creation skipped for {table_name}: {exc}")
+        return False
+
+
+def _maybe_rebuild_sem_index() -> None:
+    global _sem_write_count, _sem_index_exists
+    _sem_write_count += 1
+    if _sem_write_count >= _IVF_REBUILD_EVERY:
+        _sem_write_count = 0
+        ok = _try_create_index(_get_sem_table(), SEMANTIC_TABLE)
+        if ok:
+            _sem_index_exists = True
+
+
+def _maybe_rebuild_doc_index() -> None:
+    global _doc_write_count, _doc_index_exists
+    _doc_write_count += 1
+    if _doc_write_count >= _IVF_REBUILD_EVERY:
+        _doc_write_count = 0
+        ok = _try_create_index(_get_doc_table(), DOCUMENT_TABLE)
+        if ok:
+            _doc_index_exists = True
+
+
+def _search_with_index(table, vec: list[float], limit: int, has_index: bool) -> list:
+    """Run a vector search, using nprobes when an IVF-PQ index exists."""
+    q = table.search(vec).limit(limit)
+    if has_index:
+        try:
+            q = q.nprobes(20).refine_factor(10)
+        except Exception:
+            pass
+    return q.to_list()
 
 
 # ── Chunking ──────────────────────────────────────────────────────────────────
@@ -224,6 +283,7 @@ def write_memory(
         })
 
     table.add(rows)
+    _maybe_rebuild_sem_index()
     return ids
 
 
@@ -283,6 +343,7 @@ def write_document(filename: str, content: str, file_hash: str, is_temporary: bo
     try:
         table.add(rows)
         print(f"[Memory] Stored {len(rows)} {'temporary ' if is_temporary else ''}chunks for '{filename}'")
+        _maybe_rebuild_doc_index()
     except Exception as exc:
         print(f"[Memory] table.add failed for '{filename}': {exc}")
         traceback.print_exc()
@@ -323,7 +384,7 @@ def search_memory(
         if table.count_rows() == 0:
             return []
         q_vec = embed([query])[0]
-        results = table.search(q_vec).limit(limit * 3).to_list()
+        results = _search_with_index(table, q_vec, limit * 3, _sem_index_exists)
     except Exception:
         return []
 
@@ -366,7 +427,7 @@ def search_documents(query: str, limit: int = 3) -> list[MemoryChunk]:
         if table.count_rows() == 0:
             return []
         q_vec = embed([query])[0]
-        results = table.search(q_vec).limit(limit * 2).to_list()
+        results = _search_with_index(table, q_vec, limit * 2, _doc_index_exists)
     except Exception:
         return []
 

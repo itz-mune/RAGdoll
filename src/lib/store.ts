@@ -171,13 +171,15 @@ export interface AppSettings {
   fontSize: 'small' | 'medium' | 'large';
   messageDensity: 'comfortable' | 'compact';
   sendOnEnter: boolean;
+  mdPreview: boolean;
 }
 
 const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: 'dark',
   fontSize: 'medium',
   messageDensity: 'comfortable',
-  sendOnEnter: false,
+  sendOnEnter: true,
+  mdPreview: true,
 };
 
 export async function getAppSettings(): Promise<AppSettings> {

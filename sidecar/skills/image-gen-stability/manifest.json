@@ -1,0 +1,37 @@
+{
+  "id": "image-gen-stability",
+  "name": "Image Generator (Stability AI)",
+  "version": "1.0.0",
+  "category": "skill",
+  "author": "RAGdoll",
+  "description": "Generate images using Stability AI's diffusion models directly from chat.",
+  "icon": "🎨",
+  "entry": "skill.py",
+  "min_ragdoll_version": "0.1.0",
+  "tags": ["image", "generation", "stability", "diffusion"],
+  "config_fields": [
+    {
+      "key": "api_key",
+      "label": "Stability AI API Key",
+      "type": "password",
+      "placeholder": "sk-...",
+      "help": "Get your key at platform.stability.ai/account/keys"
+    },
+    {
+      "key": "default_style",
+      "label": "Default style preset",
+      "type": "select",
+      "options": ["photographic", "anime", "digital-art", "cinematic", "3d-model"],
+      "default": "photographic",
+      "help": "Applied to all image generation requests"
+    },
+    {
+      "key": "cfg_scale",
+      "label": "Prompt strength",
+      "type": "number",
+      "placeholder": "7",
+      "default": 7,
+      "help": "Higher values follow the prompt more strictly (1–35)"
+    }
+  ]
+}

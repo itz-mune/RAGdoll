@@ -129,6 +129,9 @@ def get_llm(provider: str, api_key: str, model: str | None = None, streaming: bo
             api_key=api_key,
             model=model or "claude-3-5-sonnet-20241022",
             streaming=streaming,
+            model_kwargs={
+                "extra_headers": {"anthropic-beta": "prompt-caching-2024-07-31"},
+            },
         )
 
     if provider == "groq":

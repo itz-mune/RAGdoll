@@ -1,4 +1,11 @@
 """RAGdoll sidecar — FastAPI server on localhost:8765."""
+# ── Silence noisy third-party warnings before any HF imports ─────────────────
+import os, warnings
+os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")   # no "unauthenticated" nag
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")       # avoids fork deadlock warning
+warnings.filterwarnings("ignore", message=".*unauthenticated.*")
+warnings.filterwarnings("ignore", message=".*HF_TOKEN.*")
+# ─────────────────────────────────────────────────────────────────────────────
 from contextlib import asynccontextmanager
 import asyncio
 import csv
@@ -10,29 +17,61 @@ import uuid
 from pathlib import Path
 from typing import Optional, List
 
+import httpx
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from db import ConversationModel, ConversationSummary, MessageModel, engine, init_db
 
+# ── Global state ──────────────────────────────────────────────────────────────
+
+_sidecar_stage: str = "starting"
+_http_client: httpx.AsyncClient | None = None
+
+# Pre-fetch cache: md5(query) → RetrievalResult (short-lived, used within same request window)
+_prefetch_cache: dict[str, object] = {}
+
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _sidecar_stage, _http_client
     print("[RAGdoll] Sidecar starting on port 8765")
+
+    _sidecar_stage = "db"
     init_db()
     print("[RAGdoll] Database initialised")
-    # Delete temporary document chunks left over from the previous session
+
+    # Shared HTTP/2 client pool
+    _http_client = httpx.AsyncClient(
+        http2=True,
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        timeout=30.0,
+    )
+
+    # Kick off background tasks — don't block the port from opening
     asyncio.create_task(_cleanup_temp_docs())
-    # Warm up embedding model in background so first request isn't slow
-    asyncio.create_task(_warm_embed_model())
+    _sidecar_stage = "warming_up"
+    asyncio.create_task(_warm_embed_model_bg())
+
+    # Yield immediately so uvicorn opens the port and /health starts responding
     yield
+
     print("[RAGdoll] Sidecar shutting down")
+    if _http_client and not _http_client.is_closed:
+        await _http_client.aclose()
+
+
+def _get_http() -> httpx.AsyncClient:
+    if _http_client is None or _http_client.is_closed:
+        return httpx.AsyncClient(timeout=30.0)
+    return _http_client
 
 
 async def _cleanup_temp_docs():
@@ -45,21 +84,25 @@ async def _cleanup_temp_docs():
 
 async def _warm_embed_model():
     try:
-        await asyncio.to_thread(_load_embed_model)
+        from memory.embedder import warmup
+        await asyncio.to_thread(warmup)
         print("[RAGdoll] Embedding model ready")
     except Exception as exc:
         print(f"[RAGdoll] Embedding model load failed: {exc}")
 
 
-def _load_embed_model():
-    from memory.store import get_embed_model
-    get_embed_model()
+async def _warm_embed_model_bg():
+    """Run model warm-up as a background task so uvicorn opens the port immediately."""
+    global _sidecar_stage
+    await _warm_embed_model()
+    _sidecar_stage = "ready"
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="RAGdoll Sidecar", version="0.1.0", lifespan=lifespan)
 
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:1420", "tauri://localhost"],
@@ -114,7 +157,7 @@ class FileProcessRequest(BaseModel):
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.1.0", "stage": _sidecar_stage}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -152,14 +195,12 @@ async def validate_settings(request: SettingsValidationRequest) -> dict:
 
 
 async def _validate_openai(api_key: str) -> dict:
-    import httpx
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=10,
-            )
+        r = await _get_http().get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
         if r.status_code == 200:
             return {"valid": True, "error": None}
         if r.status_code == 401:
@@ -170,14 +211,12 @@ async def _validate_openai(api_key: str) -> dict:
 
 
 async def _validate_anthropic(api_key: str) -> dict:
-    import httpx
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                "https://api.anthropic.com/v1/models",
-                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-                timeout=10,
-            )
+        r = await _get_http().get(
+            "https://api.anthropic.com/v1/models",
+            headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+            timeout=10,
+        )
         if r.status_code == 200:
             return {"valid": True, "error": None}
         if r.status_code == 401:
@@ -188,14 +227,12 @@ async def _validate_anthropic(api_key: str) -> dict:
 
 
 async def _validate_groq(api_key: str) -> dict:
-    import httpx
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                "https://api.groq.com/openai/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=10,
-            )
+        r = await _get_http().get(
+            "https://api.groq.com/openai/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
         if r.status_code == 200:
             return {"valid": True, "error": None}
         if r.status_code == 401:
@@ -206,13 +243,11 @@ async def _validate_groq(api_key: str) -> dict:
 
 
 async def _validate_google(api_key: str) -> dict:
-    import httpx
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
-                timeout=10,
-            )
+        r = await _get_http().get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+            timeout=10,
+        )
         if r.status_code == 200:
             return {"valid": True, "error": None}
         if r.status_code in (400, 401):
@@ -223,14 +258,12 @@ async def _validate_google(api_key: str) -> dict:
 
 
 async def _validate_huggingface(api_key: str, model: str) -> dict:
-    import httpx
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"https://api-inference.huggingface.co/models/{model}",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=10,
-            )
+        r = await _get_http().get(
+            f"https://api-inference.huggingface.co/models/{model}",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
         if r.status_code == 200:
             return {"valid": True, "error": None}
         if r.status_code == 401:
@@ -245,14 +278,12 @@ async def _validate_huggingface(api_key: str, model: str) -> dict:
 
 
 async def _validate_openrouter(api_key: str, model: str) -> dict:
-    import httpx
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                "https://openrouter.ai/api/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=10,
-            )
+        r = await _get_http().get(
+            "https://openrouter.ai/api/v1/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
         if r.status_code == 401:
             return {"valid": False, "error": "Invalid OpenRouter key"}
         if r.status_code != 200:
@@ -266,10 +297,8 @@ async def _validate_openrouter(api_key: str, model: str) -> dict:
 
 
 async def _validate_ollama(base_url: str) -> dict:
-    import httpx
     try:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"{base_url}/api/tags", timeout=10)
+        r = await _get_http().get(f"{base_url}/api/tags", timeout=10)
         if r.status_code == 200:
             return {"valid": True, "error": None}
         return {"valid": False, "error": f"Ollama error {r.status_code}"}
@@ -571,6 +600,63 @@ async def clear_all_memory() -> dict:
     return {"status": "cleared"}
 
 
+@app.get("/memory/prefetch")
+async def prefetch_context(q: str = Query(...)) -> dict:
+    """Pre-warm retrieval for a likely query while the user is still typing."""
+    import hashlib as _hl
+    key = _hl.md5(q.encode()).hexdigest()
+    try:
+        from memory.retriever import retrieve_context
+        result = await retrieve_context(q, conversation_id="")
+        _prefetch_cache[key] = result
+        # Evict oldest entries when cache grows large
+        if len(_prefetch_cache) > 64:
+            oldest = next(iter(_prefetch_cache))
+            _prefetch_cache.pop(oldest, None)
+    except Exception:
+        pass
+    return {"status": "ok", "key": key}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Debug / benchmark
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/debug/benchmark")
+async def benchmark() -> dict:
+    """Benchmark embedding throughput and LRU cache hit rate."""
+    import time as _t
+    from memory.embedder import embed, lru_stats
+
+    queries = [
+        "What is machine learning?",
+        "Tell me about transformer models",
+        "Hello world test sentence",
+        "RAGdoll is a local AI assistant",
+    ]
+    # Cold run (first call populates LRU cache)
+    t0 = _t.perf_counter()
+    for _ in range(5):
+        await asyncio.to_thread(embed, queries)
+    cold_ms = round((_t.perf_counter() - t0) * 1000, 1)
+
+    # Hot run (all from LRU cache)
+    t1 = _t.perf_counter()
+    for _ in range(5):
+        await asyncio.to_thread(embed, queries)
+    hot_ms = round((_t.perf_counter() - t1) * 1000, 1)
+
+    from cache.response_cache import stats as cache_stats
+    return {
+        "embed_cold_5runs_ms": cold_ms,
+        "embed_hot_5runs_ms": hot_ms,
+        "speedup_x": round(cold_ms / hot_ms, 1) if hot_ms > 0 else 0,
+        "lru": lru_stats(),
+        "response_cache": cache_stats(),
+        "sidecar_stage": _sidecar_stage,
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Plugin endpoints
 # ══════════════════════════════════════════════════════════════════════════════
@@ -617,11 +703,25 @@ async def uninstall_plugin_endpoint(plugin_id: str) -> dict:
     return {"status": "uninstalled", "id": plugin_id}
 
 
+@app.get("/plugins/{plugin_id}/config")
+async def get_plugin_config_endpoint(plugin_id: str) -> dict:
+    from plugins.state import get_plugin_config
+    config = await asyncio.to_thread(get_plugin_config, plugin_id)
+    return {"config": config}
+
+
 @app.post("/plugins/{plugin_id}/config")
 async def set_plugin_config_endpoint(plugin_id: str, body: PluginConfigRequest) -> dict:
     from plugins.state import set_plugin_config
     await asyncio.to_thread(set_plugin_config, plugin_id, body.config)
-    return {"status": "ok"}
+    return {"success": True}
+
+
+@app.post("/plugins/{plugin_id}/config/reset")
+async def reset_plugin_config_endpoint(plugin_id: str) -> dict:
+    from plugins.state import reset_plugin_config
+    await asyncio.to_thread(reset_plugin_config, plugin_id)
+    return {"success": True}
 
 
 @app.post("/plugins/style/{plugin_id}/activate")
@@ -646,6 +746,40 @@ async def install_plugin_endpoint(body: PluginInstallRequest) -> dict:
         return {"success": True, "error": None}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Dashboard
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/dashboard/stats")
+async def dashboard_stats(days: int = 30) -> dict:
+    try:
+        from plugins.activity import get_stats
+        return await asyncio.to_thread(get_stats, days)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/dashboard/activity")
+async def dashboard_activity(limit: int = 20) -> list:
+    try:
+        from plugins.activity import get_recent_activity
+        return await asyncio.to_thread(get_recent_activity, limit)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class PinnedRequest(BaseModel):
+    ids: List[str]
+
+@app.post("/dashboard/pinned")
+async def dashboard_pinned(body: PinnedRequest) -> list:
+    try:
+        from plugins.activity import get_pinned_conversations
+        return await asyncio.to_thread(get_pinned_conversations, body.ids)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -748,34 +882,111 @@ async def _stream_response(
                 user_storage["importance_override"],
             ))
 
-        # 4. Retrieve relevant context
-        from memory.retriever import retrieve_context
-        # Use the display message (user's typed question only) for retrieval —
-        # user_message may contain thousands of chars of injected file content
-        # which overwhelms the 512-token embedding and ruins similarity scores.
-        retrieval_query = display_message if display_message else user_message
-        retrieval = await retrieve_context(retrieval_query, conversation_id)
-
-        # 5. Load conversation summary (if compacted)
-        summary = _get_conversation_summary(db, conversation_id)
-
-        # 6. Load plugin skills and style
+        # 4. Route query + parallel retrieval / summary / plugin load
+        from memory.router import route_query
+        from memory.retriever import retrieve_context, RetrievalResult
         from plugins.loader import get_active_style, get_enabled_skills
-        plugin_tools = await asyncio.to_thread(get_enabled_skills)
-        active_style = await asyncio.to_thread(get_active_style)
 
-        # 6b. Build system prompt
+        retrieval_query = display_message if display_message else user_message
+        route = route_query(retrieval_query)
+
+        # Check pre-fetch cache first
+        import hashlib as _hl
+        _pf_key = _hl.md5(retrieval_query.encode()).hexdigest()
+        _prefetch_hit = _prefetch_cache.pop(_pf_key, None)
+
+        async def _do_retrieval() -> RetrievalResult:
+            if _prefetch_hit is not None:
+                return _prefetch_hit  # type: ignore[return-value]
+            if route == "skip":
+                return RetrievalResult()
+            coro = retrieve_context(retrieval_query, conversation_id)
+            if route == "retrieve":
+                try:
+                    return await asyncio.wait_for(coro, timeout=1.5)
+                except asyncio.TimeoutError:
+                    return RetrievalResult()
+            return await coro  # "force"
+
+        retrieval, summary, plugin_tools, active_style = await asyncio.gather(
+            _do_retrieval(),
+            asyncio.to_thread(_get_conversation_summary, db, conversation_id),
+            asyncio.to_thread(get_enabled_skills),
+            asyncio.to_thread(get_active_style),
+        )
+
+        # 5. Contextual compression
+        from memory.compressor import compress_chunks
+        retrieval.chunks = compress_chunks(retrieval.chunks, retrieval_query, provider)
+
+        # 6. Build system prompt
         from graph.agent import get_style_contract
         from memory.prompt_builder import build_system_prompt
         style_suffix = get_style_contract(response_style) if has_response_style else ""
-        # Prepend style plugin prompt prefix if one is active
         if active_style and active_style.get("system_prompt_prefix"):
             style_suffix = active_style["system_prompt_prefix"] + "\n\n" + style_suffix
+
+        # Inject capability-expansion policy when skill-finder is active
+        has_skill_finder = any(
+            getattr(t, "name", "") in ("search_marketplace", "install_skill", "install_and_activate_style")
+            for t in (plugin_tools or [])
+        )
+        if has_skill_finder:
+            skill_finder_policy = (
+                "CAPABILITY EXPANSION POLICY (applies to every message):\n"
+                "You have access to a plugin marketplace via the search_marketplace tool.\n"
+                "Whenever the user's request falls outside your native abilities — or when they ask for\n"
+                "a speaking style (pirate, Shakespearean, formal, etc.), an image generator, a web search,\n"
+                "a video transcript, file processing, or ANY specialised capability — follow this exact workflow:\n"
+                "  1. Call search_marketplace(query) with a short description of what is needed.\n"
+                "  2. If a matching plugin is found: call install_skill or install_and_activate_style with its id.\n"
+                "  3. If no plugin matches: tell the user nothing was found, then do your best natively.\n"
+                "NEVER skip step 1. NEVER mimic a style or simulate a capability without searching first.\n"
+                "For styles specifically: calling install_and_activate_style makes the style persist across\n"
+                "ALL future messages. Just responding in the style yourself only lasts one reply."
+            )
+            style_suffix = skill_finder_policy + ("\n\n" + style_suffix if style_suffix else "")
+
         system_prompt_text = build_system_prompt(retrieval, summary, style_suffix)
 
-        # 7. Build LangChain message list
+        # 7. Check semantic response cache
+        system_hash = hashlib.md5(system_prompt_text.encode()).hexdigest()
+        from cache.response_cache import lookup as cache_lookup, store as cache_store
+        cache_hit = cache_lookup(retrieval_query, system_hash)
+
+        if cache_hit:
+            # Replay cached response
+            if cache_hit.thinking:
+                yield _sse({"type": "thinking", "content": cache_hit.thinking, "is_partial": False})
+                yield _sse({"type": "thinking_done"})
+            if cache_hit.tool_calls:
+                yield _sse({"type": "tool_use", "tools": cache_hit.tool_calls})
+            for chunk in _chunk_for_display(cache_hit.response):
+                yield _sse_chunk(chunk)
+            assistant_msg_id = str(uuid.uuid4())
+            db.add(MessageModel(
+                id=assistant_msg_id,
+                conversation_id=conversation_id,
+                role="assistant",
+                content=cache_hit.response,
+                created_at=int(time.time() * 1000),
+                tool_calls_made=json.dumps(cache_hit.tool_calls) if cache_hit.tool_calls else None,
+            ))
+            conv.message_count += 2
+            conv.updated_at = int(time.time() * 1000)
+            db.add(conv)
+            db.commit()
+            yield _sse({"type": "done", "messageId": assistant_msg_id})
+            return
+
+        # 8. Build LangChain message list — use cache_control blocks for Anthropic
         known_files: list = file_names or []
-        lc_messages = [SystemMessage(content=system_prompt_text)]
+        if provider.lower() == "anthropic":
+            sys_content = [{"type": "text", "text": system_prompt_text, "cache_control": {"type": "ephemeral"}}]
+            lc_messages = [SystemMessage(content=sys_content)]
+        else:
+            lc_messages = [SystemMessage(content=system_prompt_text)]
+
         for m in history:
             if m.role == "user":
                 lc_messages.append(HumanMessage(content=m.content))
@@ -783,24 +994,19 @@ async def _stream_response(
                 lc_messages.append(AIMessage(content=m.content))
         lc_messages.append(HumanMessage(content=user_message))
 
-        # 8. Emit memory context event before the answer
+        # 9. Emit memory context event
         if retrieval.chunks:
             yield _sse({
                 "type": "memory",
                 "chunks": [
-                    {
-                        "id": c.id,
-                        "text": c.text[:1400],
-                        "score": round(c.score, 3),
-                        "source": c.source,
-                    }
+                    {"id": c.id, "text": c.text[:1400], "score": round(c.score, 3), "source": c.source}
                     for c in retrieval.chunks
                 ],
                 "semantic": retrieval.semantic_count,
                 "docs": retrieval.document_count,
             })
 
-        # 9. Build graph and run — concurrently drain an event_queue for early SSE signals
+        # 10. Run the LangGraph — drain event_queue concurrently for early tool_use events
         from graph.agent import build_chat_graph, get_style_contract as _gsc
         event_queue: asyncio.Queue = asyncio.Queue()
         graph = build_chat_graph(
@@ -824,13 +1030,8 @@ async def _stream_response(
             "max_style_iterations": 5,
         }
 
-        full_content = ""
         assistant_msg_id = str(uuid.uuid4())
-        thinking_content = ""
-
-        # Run graph as a background task so we can concurrently drain event_queue.
-        # This lets tool_use SSE fire the moment the LLM decides to call a tool —
-        # rather than waiting for the whole graph to finish.
+        _graph_start_ms = int(time.time() * 1000)
         final_state_box: list = [initial_state]
 
         async def _run_graph():
@@ -838,19 +1039,14 @@ async def _stream_response(
                 final_state_box[0] = state
 
         graph_task = asyncio.create_task(_run_graph())
-
-        # Drain queue while graph runs; yield any early events (tool_use) immediately.
         while not graph_task.done():
             try:
                 event = event_queue.get_nowait()
                 yield _sse(event)
             except asyncio.QueueEmpty:
                 await asyncio.sleep(0.02)
-
-        # Propagate any graph exception
         await graph_task
 
-        # Drain any remaining events that arrived after graph_task finished
         while not event_queue.empty():
             yield _sse(event_queue.get_nowait())
 
@@ -861,34 +1057,40 @@ async def _stream_response(
         if not full_content:
             messages_list = final_state.get("messages", [])
             if messages_list:
-                last = messages_list[-1]
-                raw = last.content if hasattr(last, "content") else ""
+                raw = getattr(messages_list[-1], "content", "")
                 full_content = _message_content_to_text(raw)
 
-        # 9b. tool_use was already emitted early via event_queue above.
-        # No need to emit again — skip duplicate emission.
-
-        # 9c. Emit thinking content if present
+        # 11. Emit thinking + stream chunks (no sleep — rAF batches on the client)
         if thinking_content:
             yield _sse({"type": "thinking", "content": thinking_content, "is_partial": False})
             yield _sse({"type": "thinking_done"})
 
-        # 10. Stream response chunks
         for content_chunk in _chunk_for_display(full_content):
-            yield _sse({"type": "chunk", "content": content_chunk})
-            await asyncio.sleep(0.015)
+            yield _sse_chunk(content_chunk)
 
-        # 11. Citations — always surface every attached file + doc-memory sources
+        # 12. Citations
         citation_set: set[str] = set(known_files or [])
         for c in retrieval.chunks:
             if c.source != "conversation":
                 citation_set.add(c.source)
         citations = sorted(citation_set)
-
         if citations:
             yield _sse({"type": "citations", "citations": citations})
 
-        # 12. Persist assistant message
+        # 13. Persist assistant message + extract token usage
+        _response_time_ms = int(time.time() * 1000) - _graph_start_ms
+        _tokens_used: Optional[int] = None
+        try:
+            _last_msg = final_state.get("messages", [])[-1] if final_state.get("messages") else None
+            if _last_msg and hasattr(_last_msg, "usage_metadata") and _last_msg.usage_metadata:
+                _tokens_used = _last_msg.usage_metadata.get("total_tokens")
+            elif _last_msg and hasattr(_last_msg, "response_metadata"):
+                _rm = _last_msg.response_metadata or {}
+                _tu = _rm.get("token_usage") or _rm.get("usage") or {}
+                _tokens_used = _tu.get("total_tokens") or _tu.get("input_tokens", 0) + _tu.get("output_tokens", 0) or None
+        except Exception:
+            pass
+
         db.add(MessageModel(
             id=assistant_msg_id,
             conversation_id=conversation_id,
@@ -901,13 +1103,18 @@ async def _stream_response(
             ]) if retrieval.chunks else None,
             citations=json.dumps(citations) if citations else None,
             tool_calls_made=json.dumps(tool_calls_made) if tool_calls_made else None,
+            tokens_used=_tokens_used,
+            response_time_ms=_response_time_ms,
         ))
         conv.message_count += 2
         conv.updated_at = int(time.time() * 1000)
         db.add(conv)
         db.commit()
 
-        # 13. Store assistant response in memory
+        # 14. Store response in semantic cache + write assistant memory (fire-and-forget)
+        asyncio.create_task(asyncio.to_thread(
+            cache_store, retrieval_query, system_hash, full_content, thinking_content, tool_calls_made
+        ))
         asst_storage = storage_decision(full_content, "assistant")
         if asst_storage["should_store"]:
             asyncio.create_task(_store_memory(
@@ -915,7 +1122,7 @@ async def _stream_response(
                 asst_storage["importance_override"],
             ))
 
-        # 14. Auto-title on first exchange
+        # 15. Auto-title on first exchange
         if conv.message_count == 2 and conv.title in ("New conversation", ""):
             auto_title = await _generate_title(provider, api_key, model, user_message)
             if auto_title:
@@ -924,7 +1131,7 @@ async def _stream_response(
                 db.commit()
                 yield _sse({"type": "title", "title": auto_title})
 
-        # 15. Schedule compaction check
+        # 16. Schedule compaction check
         from memory.compactor import record_message_time, maybe_compact
         record_message_time(conversation_id)
         asyncio.create_task(maybe_compact(conversation_id))
@@ -940,6 +1147,11 @@ async def _stream_response(
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
+
+
+def _sse_chunk(text: str) -> str:
+    """Compact SSE for text chunks — smaller wire payload, parsed by frontend."""
+    return f'data: {{"t":"c","d":{json.dumps(text)}}}\n\n'
 
 
 def _message_content_to_text(raw) -> str:
@@ -1067,4 +1279,23 @@ if __name__ == "__main__":
     port = get_sidecar_port()
     host = get_sidecar_host()
     _free_port(port)
-    uvicorn.run(app, host=host, port=port, log_level="info")
+
+    run_kwargs: dict = {"host": host, "port": port, "log_level": "info"}
+
+    # httptools is faster than the default h11 HTTP parser
+    try:
+        import httptools  # noqa: F401
+        run_kwargs["http"] = "httptools"
+    except ImportError:
+        pass
+
+    # uvloop is Linux/Mac only; Windows falls back to the default asyncio loop
+    try:
+        import uvloop  # noqa: F401
+        import platform
+        if platform.system() != "Windows":
+            run_kwargs["loop"] = "uvloop"
+    except ImportError:
+        pass
+
+    uvicorn.run(app, **run_kwargs)

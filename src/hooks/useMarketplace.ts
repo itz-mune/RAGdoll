@@ -45,9 +45,11 @@ export interface InstalledPlugin {
 export interface ConfigField {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'number';
+  type: 'text' | 'password' | 'number' | 'toggle' | 'select';
   placeholder?: string;
   help?: string;
+  options?: string[];           // 'select' only
+  default?: string | number | boolean;
 }
 
 // ── Version helpers ───────────────────────────────────────────────────────────
@@ -204,6 +206,7 @@ export function useMarketplace(): UseMarketplaceReturn {
 
       setInstallProgress(mode === 'update' ? `Updated ✓` : `Done ✓`);
       await fetchInstalled();
+      window.dispatchEvent(new CustomEvent('ragdoll:plugins-changed'));
       setTimeout(() => {
         if (mountedRef.current) setInstallProgress(null);
       }, 1500);
@@ -230,6 +233,7 @@ export function useMarketplace(): UseMarketplaceReturn {
   const uninstallPlugin = useCallback(async (pluginId: string) => {
     await fetch(`${SIDECAR_URL}/plugins/${pluginId}/uninstall`, { method: 'POST' });
     await fetchInstalled();
+    window.dispatchEvent(new CustomEvent('ragdoll:plugins-changed'));
   }, [fetchInstalled]);
 
   const enablePlugin = useCallback(async (pluginId: string) => {

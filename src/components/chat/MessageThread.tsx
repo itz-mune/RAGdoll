@@ -47,6 +47,7 @@ export function MessageThread() {
   const messages = chatStore((state) =>
     activeConversationId ? (state.messages[activeConversationId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES
   );
+  const targetMessageId = chatStore((state) => state.targetMessageId);
   const containerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   // Ref tracks the real-time scroll position; state drives the UI button only.
@@ -60,6 +61,25 @@ export function MessageThread() {
   // is restored before messages have loaded (e.g. on app restart).
   const pendingInstantScrollRef = useRef(true);
   const { sendMessage } = useChat();
+
+  // Scroll to a specific message when targeted from command palette
+  useEffect(() => {
+    if (!targetMessageId || messages.length === 0) return;
+    // Small delay to let the DOM render after conversation switch
+    const timer = setTimeout(() => {
+      const el = document.querySelector(`[data-message-id="${targetMessageId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Briefly highlight the message
+        el.classList.add('ring-2', 'ring-[var(--accent)]', 'ring-offset-2', 'ring-offset-background');
+        setTimeout(() => {
+          el.classList.remove('ring-2', 'ring-[var(--accent)]', 'ring-offset-2', 'ring-offset-background');
+          chatStore.getState().setTargetMessageId(null);
+        }, 1800);
+      }
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [targetMessageId, messages]);
 
   // Conversation switch → instant jump to bottom (no visible scroll animation).
   // New message during streaming → smooth scroll only if already near bottom.
@@ -129,7 +149,7 @@ export function MessageThread() {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto px-4 py-6"
+        className="h-full overflow-y-auto px-4 pt-6 pb-36"
       >
         <div className="mx-auto max-w-3xl space-y-5">
           {messages.map((message, idx) => {
@@ -149,15 +169,15 @@ export function MessageThread() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Scroll-to-bottom button */}
+      {/* Scroll-to-bottom button — slides in from below, exits all the way down */}
       <AnimatePresence>
         {!isAtBottom && (
           <motion.div
-            initial={{ opacity: 0, y: 8 }}
+            initial={{ opacity: 0, y: 80 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.15 }}
-            className="absolute bottom-4 left-1/2 -translate-x-1/2"
+            exit={{ opacity: 0, y: 80 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="absolute bottom-36 left-1/2 -translate-x-1/2"
           >
             <button
               onClick={scrollToBottom}
@@ -210,10 +230,11 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
 
   return (
     <motion.div
+      data-message-id={message.id}
       initial={{ y: 10, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.15 }}
-      className={cn('flex flex-col', isUser ? 'items-end' : 'items-start')}
+      className={cn('flex flex-col transition-all duration-300', isUser ? 'items-end' : 'items-start')}
     >
       {/* Tool-use pill — only rendered once streaming is done (quiet "Used X" state).
           While still streaming the inline SkillLoadingIndicator inside the bubble

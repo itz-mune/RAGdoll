@@ -54,8 +54,10 @@ export function usePluginUpdateCount(): number {
   useEffect(() => {
     check();
     timerRef.current = setInterval(check, POLL_INTERVAL);
+    window.addEventListener('ragdoll:plugins-changed', check);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      window.removeEventListener('ragdoll:plugins-changed', check);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Puzzle, Palette, Zap, Check, Blocks, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { chatStore } from '@/store/chatStore';
 
 const SIDECAR_URL = 'http://127.0.0.1:8765';
 
@@ -29,6 +30,7 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
   const [loading, setLoading] = useState(false);
   const [confirmUninstall, setConfirmUninstall] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pluginVersion = chatStore((state) => state.pluginVersion);
 
   // Close on outside click
   useEffect(() => {
@@ -55,6 +57,18 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [open]);
+
+  // Re-fetch whenever the AI installs or activates a plugin
+  useEffect(() => {
+    if (pluginVersion === 0) return;
+    fetch(`${SIDECAR_URL}/plugins`)
+      .then((r) => r.json())
+      .then((data: PluginsResponse) => {
+        setPlugins(data.plugins ?? []);
+        setActiveStyle(data.active_style ?? null);
+      })
+      .catch(() => {});
+  }, [pluginVersion]);
 
   const skills = plugins.filter((p) => p.category === 'skill');
   const styles = plugins.filter((p) => p.category === 'style');
@@ -101,9 +115,6 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
 
   const activeAddonCount = addons.filter((p) => p.is_enabled).length;
 
-  // Build indicator label for the button
-  const hasActive = activeSkillCount > 0 || !!activeStyle || activeAddonCount > 0;
-
   return (
     <div ref={containerRef} className="relative">
       {/* Trigger button */}
@@ -120,10 +131,6 @@ export function PluginPickerButton({ disabled }: { disabled?: boolean }) {
         )}
       >
         <Puzzle className="h-4 w-4" />
-        {/* Active indicator dot */}
-        {hasActive && (
-          <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary" />
-        )}
       </button>
 
       {/* Popover */}
