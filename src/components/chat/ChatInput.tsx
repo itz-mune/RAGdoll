@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Send, Paperclip, Square, AlertCircle, PlusCircle } from 'lucide-react';
+import { Send, Paperclip, Square, AlertCircle, PlusCircle, Archive } from 'lucide-react';
 import { useChat } from '@/hooks/useChat';
 import { chatStore } from '@/store/chatStore';
+import { toast } from 'sonner';
 import { FileUploadButton } from './FileUploadButton';
 import { AttachedFilesList } from './AttachedFilesList';
 import { ProfileSwitcher } from './ProfileSwitcher';
@@ -55,6 +56,7 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
   const [attachedFilesByConversation, setAttachedFilesByConversation] = useState<Record<string, AttachedFile[]>>({});
   const attachedFiles = activeConversationId ? (attachedFilesByConversation[activeConversationId] ?? []) : [];
   const [fileError, setFileError] = useState<string | null>(null);
+  const [isCompacting, setIsCompacting] = useState(false);
   const [sendOnEnter, setSendOnEnter] = useState(true);
   const [mdPreview, setMdPreview] = useState(true);
   const [inputFocused, setInputFocused] = useState(false);
@@ -133,10 +135,75 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
     return () => clearTimeout(t);
   }, [fileError]);
 
+  // ── /compact slash command ────────────────────────────────────────────────────
+
+  const handleCompact = useCallback(async () => {
+    if (!activeConversationId || isCompacting) return;
+    setIsCompacting(true);
+    setInput('');
+
+    const conversations = chatStore.getState().conversations;
+    const conv = conversations.find((c) => c.id === activeConversationId);
+    const { profileStore, getProfileApiKey } = await import('@/store/profileStore');
+    const profile = profileStore.getState().getActiveProfile();
+    const provider = profile?.provider ?? conv?.provider ?? 'openai';
+    const model    = profile?.modelName ?? conv?.model ?? 'gpt-4o';
+    const apiKey   = profile ? (await getProfileApiKey(profile.id)) ?? '' : '';
+
+    try {
+      const toastId = toast.loading('Compacting conversation…');
+      const res = await fetch('http://127.0.0.1:8765/chat/compact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: activeConversationId, provider, api_key: apiKey, model }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        toast.error(data.error ?? 'Compact failed', { id: toastId });
+        return;
+      }
+
+      // Reload the compacted messages from the sidecar
+      const msgsRes = await fetch(`http://127.0.0.1:8765/conversations/${activeConversationId}/messages`);
+      const msgsData = await msgsRes.json();
+      // Endpoint returns a plain array; normalise each raw DB row to the Message shape
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const normalised = (Array.isArray(msgsData) ? msgsData : []).map((m: any) => ({
+        id:           m.id,
+        conversationId: m.conversation_id,
+        role:         m.role,
+        content:      m.content ?? '',
+        displayContent: m.display_content ?? null,
+        createdAt:    m.created_at,
+        isStreaming:  false,
+        memoryChunks: null,
+      }));
+      chatStore.getState().setMessages(activeConversationId, normalised);
+
+      toast.success(
+        `Compacted ${data.message_count_before} messages → 1 summary`,
+        { id: toastId, icon: '📋' },
+      );
+    } catch (e) {
+      toast.error('Compact failed — is the sidecar running?');
+      console.error('[compact]', e);
+    } finally {
+      setIsCompacting(false);
+    }
+  }, [activeConversationId, isCompacting, setInput]);
+
   // ── Send ──────────────────────────────────────────────────────────────────────
 
   const handleSend = async () => {
     if ((!input.trim() && attachedFiles.length === 0) || isStreaming) return;
+
+    // Handle slash commands before sending to the LLM
+    const trimmed = input.trim().toLowerCase();
+    if (trimmed === '/compact') {
+      void handleCompact();
+      return;
+    }
+
     const content = input;
     const files = attachedFiles;
     setInput('');
@@ -203,7 +270,8 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
-  const canSend  = (input.trim().length > 0 || attachedFiles.length > 0) && !isStreaming && !!activeConversationId;
+  const isCompactCommand = input.trim().toLowerCase() === '/compact';
+  const canSend  = (input.trim().length > 0 || attachedFiles.length > 0) && !isStreaming && !isCompacting && !!activeConversationId;
   const sendHint = sendOnEnter ? 'Enter to send · Ctrl+Enter for new line' : 'Ctrl+Enter to send';
   // Shadow overlay is active when mdPreview is on, there is content, and the textarea is NOT focused.
   // While focused, show raw text so selection, cursor, and editing all behave natively.
@@ -342,7 +410,7 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
               )}
             </div>
 
-            {/* Send / Stop — collapses when empty */}
+            {/* Send / Stop / Compact — collapses when empty */}
             <div
               className="shrink-0 overflow-hidden transition-all duration-200 ease-in-out"
               style={{
@@ -359,6 +427,15 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
                 >
                   <Square className="h-4 w-4 fill-current" />
                 </button>
+              ) : isCompactCommand ? (
+                <button
+                  onClick={handleSend}
+                  aria-label="Compact conversation"
+                  title="Summarise and compact this conversation"
+                  className="flex h-[42px] w-[42px] items-center justify-center rounded-xl bg-amber-500 text-white transition-transform active:scale-95"
+                >
+                  <Archive className="h-4 w-4" />
+                </button>
               ) : (
                 <button
                   onClick={handleSend}
@@ -374,7 +451,9 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
 
           {/* Hint */}
           <p className="text-center text-[10px] text-muted-foreground/50 pb-0.5">
-            {sendHint} · Ctrl+P to switch profile · 🧩 to toggle skills &amp; style
+            {isCompactCommand
+              ? '📋 Summarises all messages into a compact history — press Enter to run'
+              : `${sendHint} · Ctrl+P to switch profile · 🧩 to toggle skills & style`}
           </p>
         </div>
       </div>

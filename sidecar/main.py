@@ -381,7 +381,14 @@ async def process_files(
             else:
                 error = f"Unsupported file type: .{ext}"
 
-            if content and not error:
+            # Truncate excessively large extractions so they don't blow the context window.
+        # The full content is still indexed in LanceDB for RAG; only the inline context
+        # sent to the LLM is capped. ~80K chars ≈ 20K tokens — enough for large docs.
+        FILE_INLINE_CAP = 80_000
+        if content and len(content) > FILE_INLINE_CAP:
+            content = content[:FILE_INLINE_CAP] + f"\n\n[…truncated — {len(content):,} chars total, showing first {FILE_INLINE_CAP:,}]"
+
+        if content and not error:
                 # Always save raw bytes to disk so the document viewer can render the file.
                 from memory.store import _db_path
                 files_dir = Path(_db_path()) / "files"
@@ -957,6 +964,106 @@ async def dashboard_pinned(body: PinnedRequest) -> list:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Conversation compaction (/compact slash command)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _CompactRequest(BaseModel):
+    conversation_id: str
+    provider: str
+    api_key: str = ""
+    model: str = "gpt-4o"
+
+
+@app.post("/chat/compact")
+async def chat_compact(req: _CompactRequest):
+    """
+    Summarise all messages in a conversation and replace them with a single
+    compact summary message.  Called by the /compact slash command.
+    """
+    from langchain_core.messages import HumanMessage as _HM, SystemMessage as _SM
+
+    with Session(engine) as db:
+        history = db.exec(
+            select(MessageModel)
+            .where(MessageModel.conversation_id == req.conversation_id)
+            .order_by(MessageModel.created_at.asc())
+        ).all()
+
+        if not history:
+            return {"ok": False, "error": "No messages to compact"}
+
+        # Build a plain transcript (cap each message at 6 000 chars to stay under limit)
+        lines: list[str] = []
+        for m in history:
+            role = m.role.upper()
+            body = (m.display_content or m.content or "").strip()
+            if len(body) > 6_000:
+                body = body[:6_000] + " […]"
+            lines.append(f"[{role}]: {body}")
+        transcript = "\n\n".join(lines)
+        # If still too large, hard-cap the transcript
+        if len(transcript) > 300_000:
+            transcript = transcript[:300_000] + "\n\n[transcript truncated]"
+
+        summary_prompt = (
+            "You are a conversation summariser. "
+            "Produce a concise but complete summary of the conversation below. "
+            "Preserve all key facts, decisions, and code snippets that may be needed later. "
+            "Write in third-person past tense. Aim for 3–8 paragraphs.\n\n"
+            f"CONVERSATION:\n{transcript}"
+        )
+
+        try:
+            from graph.agent import get_llm as _bllm  # reuse LLM factory
+            llm = _bllm(req.provider, req.api_key, req.model, streaming=False)
+            response = await llm.ainvoke([_SM(content="You are a helpful assistant."),
+                                          _HM(content=summary_prompt)])
+            summary_text = str(response.content).strip()
+        except Exception as exc:
+            return {"ok": False, "error": f"LLM error: {exc}"}
+
+        # Delete existing messages and replace with one summary entry
+        now = int(time.time() * 1000)
+        summary_id = str(uuid.uuid4())
+        msg_count_before = len(history)
+
+        # Delete old messages
+        for m in history:
+            db.delete(m)
+        db.commit()
+
+        # Insert summary as an assistant message
+        summary_msg = MessageModel(
+            id=summary_id,
+            conversation_id=req.conversation_id,
+            role="assistant",
+            content=(
+                f"📋 **Conversation summary** *(this conversation was compacted from "
+                f"{msg_count_before} messages)*\n\n{summary_text}"
+            ),
+            display_content=None,
+            created_at=now,
+        )
+        db.add(summary_msg)
+
+        # Update conversation message count
+        conv = db.get(ConversationModel, req.conversation_id)
+        if conv:
+            conv.message_count = 1
+            conv.updated_at = now
+            db.add(conv)
+
+        db.commit()
+
+    return {
+        "ok": True,
+        "message_count_before": msg_count_before,
+        "message_count_after": 1,
+        "summary_id": summary_id,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Chat streaming
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1209,7 +1316,15 @@ async def _stream_response(
                 lc_messages.append(HumanMessage(content=m.content))
             elif m.role == "assistant":
                 lc_messages.append(AIMessage(content=m.content))
-        lc_messages.append(HumanMessage(content=user_message))
+        # Hard cap the current message too (protects against huge attached file contexts)
+        MSG_CAP = 200_000   # ~50K tokens
+        safe_user_message = user_message
+        if len(user_message) > MSG_CAP:
+            safe_user_message = (
+                user_message[:MSG_CAP]
+                + f"\n\n[…message truncated — {len(user_message):,} chars total]"
+            )
+        lc_messages.append(HumanMessage(content=safe_user_message))
 
         # 9. Emit memory context event
         if retrieval.chunks:
