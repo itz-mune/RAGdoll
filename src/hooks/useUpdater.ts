@@ -18,7 +18,7 @@ export interface UpdaterState {
   error: string | null;
   install: () => Promise<void>;
   dismiss: () => void;
-  recheck: () => Promise<void>;
+  recheck: () => Promise<boolean>;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -32,7 +32,9 @@ export function useUpdater(): UpdaterState {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const recheck = useCallback(async () => {
+  // Returns true if an update is available, false otherwise.
+  // Callers can await the result directly instead of watching state.
+  const recheck = useCallback(async (): Promise<boolean> => {
     try {
       // Dynamic import so the plugin is only resolved inside Tauri context
       const { check } = await import('@tauri-apps/plugin-updater');
@@ -45,14 +47,17 @@ export function useUpdater(): UpdaterState {
           body: update.body ?? null,
           date: update.date ?? null,
         });
+        return true;
       } else {
         setAvailable(false);
         setRawUpdate(null);
         setInfo(null);
+        return false;
       }
     } catch (err) {
       // Silently swallow — update check must never crash the app
       console.warn('[Updater] Check failed:', err);
+      return false;
     }
   }, []);
 

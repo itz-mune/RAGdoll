@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { MainLogo } from '@/components/ui/MainLogo';
 import {
   ArrowLeft, Settings, Cpu, Brain, Palette, Keyboard, Info,
@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { AnimatePresence as AP } from 'framer-motion';
 import { UpdateModal } from '@/components/updater/UpdateModal';
+import { useUpdater } from '@/hooks/useUpdater';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { ModelProfilesSection } from './ModelProfilesSection';
@@ -644,21 +645,27 @@ function ShortcutsSection() {
 }
 
 function AboutSection() {
+  // Use the real hook so downloading/progress are proper React state and the
+  // modal progress bar actually updates during download.
+  const updater = useUpdater();
   const [checking, setChecking] = useState(false);
   const [checkStatus, setCheckStatus] = useState<'idle' | 'up-to-date' | 'available' | 'error'>('idle');
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [pendingUpdate, setPendingUpdate] = useState<any>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
-  const handleCheckUpdates = async () => {
+  // Open the modal automatically if the background check already found an update
+  useEffect(() => {
+    if (updater.available && checkStatus === 'idle') {
+      setCheckStatus('available');
+    }
+  }, [updater.available]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleCheckUpdates = useCallback(async () => {
     setChecking(true);
     setCheckStatus('idle');
     try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const update = await check();
-      if (update?.available) {
+      const found = await updater.recheck();
+      if (found) {
         setCheckStatus('available');
-        setPendingUpdate(update);
         setModalOpen(true);
       } else {
         setCheckStatus('up-to-date');
@@ -668,34 +675,7 @@ function AboutSection() {
     } finally {
       setChecking(false);
     }
-  };
-
-  // Thin updater shim so UpdateModal can call install/dismiss
-  const updaterShim = {
-    available: !!pendingUpdate,
-    info: pendingUpdate
-      ? { version: pendingUpdate.version, body: pendingUpdate.body ?? null, date: pendingUpdate.date ?? null }
-      : null,
-    downloading: false,
-    progress: 0,
-    error: null,
-    install: async () => {
-      if (!pendingUpdate) return;
-      let downloaded = 0, total = 0;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await pendingUpdate.downloadAndInstall((ev: any) => {
-        if (ev.event === 'Started') total = ev.data?.contentLength ?? 0;
-        else if (ev.event === 'Progress') {
-          downloaded += ev.data?.chunkLength ?? 0;
-          if (total > 0) updaterShim.progress = Math.round((downloaded / total) * 100);
-        }
-      });
-      const { relaunch } = await import('@tauri-apps/plugin-process');
-      await relaunch();
-    },
-    dismiss: () => { setModalOpen(false); setPendingUpdate(null); },
-    recheck: handleCheckUpdates,
-  };
+  }, [updater]);
 
   return (
     <div className="p-6 space-y-6">
@@ -751,7 +731,7 @@ function AboutSection() {
           {checkStatus === 'available' && (
             <span className="flex items-center gap-1 text-xs text-primary">
               <Download className="h-3.5 w-3.5" />
-              {pendingUpdate?.version} is available
+              {updater.info?.version ? `${updater.info.version} is available` : 'Update available'}
             </span>
           )}
           {checkStatus === 'error' && (
@@ -765,7 +745,13 @@ function AboutSection() {
 
       <AP>
         {modalOpen && (
-          <UpdateModal updater={updaterShim as any} onClose={() => setModalOpen(false)} />
+          <UpdateModal
+            updater={updater}
+            onClose={() => {
+              setModalOpen(false);
+              updater.dismiss();
+            }}
+          />
         )}
       </AP>
     </div>
