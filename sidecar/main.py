@@ -109,14 +109,15 @@ async def _init_file_index_bg():
         plugin_dir = _plugins_dir() / "universal-file-access"
         if not plugin_dir.exists():
             return  # plugin not installed yet
-        import importlib.util, sys as _sys
+        import importlib, sys as _sys
         if str(plugin_dir) not in _sys.path:
             _sys.path.insert(0, str(plugin_dir))
-        spec = importlib.util.spec_from_file_location("_uf_indexer", plugin_dir / "indexer.py")
-        if spec and spec.loader:
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)  # type: ignore[union-attr]
-            await mod.init_index(cfg)
+        # Use importlib.import_module so the module is registered under the
+        # canonical name "indexer" in sys.modules.  skill.py's
+        # `from indexer import get_index` then finds the same instance and
+        # shares the already-built _index — no double-build, no empty results.
+        indexer = importlib.import_module("indexer")
+        await indexer.init_index(cfg)
     except Exception as exc:
         print(f"[RAGdoll] File index init skipped: {exc}")
 
@@ -794,16 +795,14 @@ async def permissions_respond(body: PermissionResponseRequest) -> dict:
 async def uf_index_stats() -> dict:
     try:
         from plugins.loader import _plugins_dir
-        import sys as _sys, importlib.util as _ilu
+        import sys as _sys, importlib
         plugin_dir = _plugins_dir() / "universal-file-access"
+        if not plugin_dir.exists():
+            return {"error": "plugin not installed"}
         if str(plugin_dir) not in _sys.path:
             _sys.path.insert(0, str(plugin_dir))
-        spec = _ilu.spec_from_file_location("_uf_indexer_s", plugin_dir / "indexer.py")
-        if not spec or not spec.loader:
-            return {"error": "plugin not installed"}
-        mod = _ilu.module_from_spec(spec)
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        return mod.get_index_stats()
+        indexer = importlib.import_module("indexer")
+        return indexer.get_index_stats()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -814,17 +813,14 @@ async def uf_index_rebuild(background_tasks: BackgroundTasks) -> dict:
         try:
             from plugins.loader import _plugins_dir
             from plugins.state import get_plugin_config
-            import sys as _sys, importlib.util as _ilu
+            import sys as _sys, importlib
             plugin_dir = _plugins_dir() / "universal-file-access"
             if str(plugin_dir) not in _sys.path:
                 _sys.path.insert(0, str(plugin_dir))
-            spec = _ilu.spec_from_file_location("_uf_indexer_r", plugin_dir / "indexer.py")
-            if spec and spec.loader:
-                mod = _ilu.module_from_spec(spec)
-                spec.loader.exec_module(mod)  # type: ignore[union-attr]
-                cfg = get_plugin_config("universal-file-access")
-                stats = await mod.build_index(cfg)
-                print(f"[RAGdoll] File index rebuilt: {stats.files_indexed} files")
+            indexer = importlib.import_module("indexer")
+            cfg = get_plugin_config("universal-file-access")
+            stats = await indexer.build_index(cfg)
+            print(f"[RAGdoll] File index rebuilt: {stats.files_indexed} files")
         except Exception as exc:
             print(f"[RAGdoll] Index rebuild failed: {exc}")
 
@@ -836,15 +832,12 @@ async def uf_index_rebuild(background_tasks: BackgroundTasks) -> dict:
 async def uf_index_clear() -> dict:
     try:
         from plugins.loader import _plugins_dir
-        import sys as _sys, importlib.util as _ilu
+        import sys as _sys, importlib
         plugin_dir = _plugins_dir() / "universal-file-access"
         if str(plugin_dir) not in _sys.path:
             _sys.path.insert(0, str(plugin_dir))
-        spec = _ilu.spec_from_file_location("_uf_indexer_c", plugin_dir / "indexer.py")
-        if spec and spec.loader:
-            mod = _ilu.module_from_spec(spec)
-            spec.loader.exec_module(mod)  # type: ignore[union-attr]
-            mod.clear_index()
+        indexer = importlib.import_module("indexer")
+        indexer.clear_index()
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
