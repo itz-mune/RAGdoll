@@ -382,13 +382,13 @@ async def process_files(
                 error = f"Unsupported file type: .{ext}"
 
             # Truncate excessively large extractions so they don't blow the context window.
-        # The full content is still indexed in LanceDB for RAG; only the inline context
-        # sent to the LLM is capped. ~80K chars ≈ 20K tokens — enough for large docs.
-        FILE_INLINE_CAP = 80_000
-        if content and len(content) > FILE_INLINE_CAP:
-            content = content[:FILE_INLINE_CAP] + f"\n\n[…truncated — {len(content):,} chars total, showing first {FILE_INLINE_CAP:,}]"
+            # The full content is still indexed in LanceDB for RAG; only the inline context
+            # sent to the LLM is capped. ~80K chars ≈ 20K tokens — enough for large docs.
+            FILE_INLINE_CAP = 80_000
+            if content and len(content) > FILE_INLINE_CAP:
+                content = content[:FILE_INLINE_CAP] + f"\n\n[…truncated — {len(content):,} chars total, showing first {FILE_INLINE_CAP:,}]"
 
-        if content and not error:
+            if content and not error:
                 # Always save raw bytes to disk so the document viewer can render the file.
                 from memory.store import _db_path
                 files_dir = Path(_db_path()) / "files"
