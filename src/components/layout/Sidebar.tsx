@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Brain, Plus, Trash2, Settings, Puzzle, LayoutDashboard, Pin, PinOff, Pencil, Search, PanelLeftClose, PanelLeftOpen, MessageSquare } from 'lucide-react';
 import { MainLogo } from '@/components/ui/MainLogo';
@@ -129,6 +129,14 @@ export function Sidebar({ onOpenSettings, onOpenMemory, onOpenMarketplace, onOpe
     chatStore.getState().setActiveConversation(id);
     onOpenConversation?.(id);
   }, [onOpenConversation]);
+
+  // Allow other parts of the app (e.g. the context-length error banner) to
+  // trigger a new conversation without drilling through prop callbacks.
+  useEffect(() => {
+    const listener = () => { void handleNewChat(); };
+    window.addEventListener('ragdoll:new-conversation', listener);
+    return () => window.removeEventListener('ragdoll:new-conversation', listener);
+  }, [handleNewChat]);
 
   const requestDelete = useCallback((id: string) => {
     setPendingDeleteId(id);

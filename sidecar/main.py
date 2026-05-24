@@ -1025,12 +1025,12 @@ async def _stream_response(
             yield _sse({"type": "error", "message": f"Conversation {conversation_id!r} not found"})
             return
 
-        # 1. History (last 10 turns before this message)
+        # 1. History — fetch up to 40 turns then token-budget trim
         history = db.exec(
             select(MessageModel)
             .where(MessageModel.conversation_id == conversation_id)
             .order_by(MessageModel.created_at.desc())
-            .limit(10)
+            .limit(40)
         ).all()
         history.reverse()
 
@@ -1181,7 +1181,30 @@ async def _stream_response(
         else:
             lc_messages = [SystemMessage(content=system_prompt_text)]
 
-        for m in history:
+        # Token-budget trim: keep the most recent history messages that fit within
+        # MAX_HISTORY_CHARS (≈ chars / 3.5 ≈ tokens). This prevents 400 context-
+        # length errors from long conversations or messages with large attachments.
+        # Budget = 80 000 tokens * 3.5 chars/token = 280 000 chars, minus headroom
+        # for system prompt, retrieved context, and response.
+        MAX_HISTORY_CHARS = 200_000   # ~57K tokens — safe across all major models
+        total_chars = 0
+        trimmed_history: list = []
+        history_trimmed = False
+        for msg in reversed(history):
+            msg_len = len(msg.content or "")
+            if total_chars + msg_len > MAX_HISTORY_CHARS:
+                history_trimmed = True
+                break
+            trimmed_history.insert(0, msg)
+            total_chars += msg_len
+
+        if history_trimmed:
+            # Inject a brief note so the model knows context was clipped
+            lc_messages.append(SystemMessage(
+                content="[Note: earlier messages in this conversation were omitted to fit the context window.]"
+            ))
+
+        for m in trimmed_history:
             if m.role == "user":
                 lc_messages.append(HumanMessage(content=m.content))
             elif m.role == "assistant":
@@ -1338,7 +1361,19 @@ async def _stream_response(
 
     except Exception as exc:
         print(f"[RAGdoll] Stream error: {exc}")
-        yield _sse({"type": "error", "message": str(exc)})
+        err_msg = str(exc)
+        # Detect context-length errors from any provider and emit a user-friendly message
+        ctx_phrases = (
+            "context length", "context_length", "context window",
+            "maximum context", "max_tokens", "token limit",
+            "tokens exceed", "too many tokens",
+        )
+        if any(p in err_msg.lower() for p in ctx_phrases):
+            err_msg = (
+                "This conversation has grown too long for the model's context window. "
+                "Start a new conversation to continue, or use /compact to summarise the history."
+            )
+        yield _sse({"type": "error", "message": err_msg})
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

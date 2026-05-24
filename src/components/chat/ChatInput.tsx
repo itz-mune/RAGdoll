@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { Send, Paperclip, Square } from 'lucide-react';
+import { Send, Paperclip, Square, AlertCircle, PlusCircle } from 'lucide-react';
 import { useChat } from '@/hooks/useChat';
 import { chatStore } from '@/store/chatStore';
 import { FileUploadButton } from './FileUploadButton';
@@ -45,7 +45,7 @@ interface ChatInputProps {
 
 export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesConsumed }: ChatInputProps) {
   const { color1, color2, color3, isDark } = useAccentHexes();
-  const { sendMessage, stopGeneration, prefetchContext, isStreaming } = useChat();
+  const { sendMessage, stopGeneration, prefetchContext, isStreaming, error: chatError } = useChat();
   const activeConversationId = chatStore((state) => state.activeConversationId);
 
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -247,6 +247,25 @@ export function ChatInput({ onNavigateToSettings, droppedFiles, onDroppedFilesCo
                 Context documents
               </div>
               <AttachedFilesList files={attachedFiles} onRemove={removeFile} onTogglePersistent={togglePersistent} />
+            </div>
+          )}
+
+          {/* Stream / LLM error banner */}
+          {chatError && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive/80" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-destructive/90">{chatError}</p>
+                {chatError.includes('context window') && (
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('ragdoll:new-conversation'))}
+                    className="mt-1 flex items-center gap-1 text-[11px] text-primary hover:underline"
+                  >
+                    <PlusCircle className="h-3 w-3" />
+                    Start a new conversation
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
