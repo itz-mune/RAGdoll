@@ -334,7 +334,7 @@ async def _run_tool_loop(
                     pass
                 for skill in get_enabled_skills():
                     if getattr(skill, "name", None) == tool_name:
-                        result = skill.invoke(tool_args)
+                        result = await skill.ainvoke(tool_args)
                         break
             except Exception as exc:
                 result = f"Tool error: {exc}"
