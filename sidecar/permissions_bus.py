@@ -49,6 +49,7 @@ async def request_permission(
     files: list[str],
     is_critical: bool = False,
     timeout: float = 60.0,
+    **extra,
 ) -> bool:
     """
     Called from within a skill's _arun to pause and request file access.
@@ -73,13 +74,16 @@ async def request_permission(
     _pending[req.id] = req
 
     # Inject the event into the live SSE stream so the frontend renders the dialog.
-    await queue.put({
-        "type": "permission_request",
-        "id": req.id,
-        "files": files,
+    # `extra` carries skill-specific payload: permission_level, operation, diff, etc.
+    event: dict = {
+        "type":        "permission_request",
+        "id":          req.id,
+        "files":       files,
         "is_critical": is_critical,
-        "file_count": len(files),
-    })
+        "file_count":  len(files),
+    }
+    event.update(extra)
+    await queue.put(event)
 
     try:
         await asyncio.wait_for(req.event.wait(), timeout=timeout)

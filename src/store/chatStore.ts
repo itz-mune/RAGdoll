@@ -28,11 +28,19 @@ export interface Message {
   toolCallsUsed?: string[];           // tool names used to produce this message
   installingPlugin?: { name: string; id: string } | null; // set while a plugin is being installed
   pendingPermission?: {
-    id: string;
-    files: string[];
-    is_critical: boolean;
-    resolved: boolean;
-    approved: boolean | null;
+    id:               string;
+    files:            string[];
+    is_critical:      boolean;
+    resolved:         boolean;
+    approved:         boolean | null;
+    // Extended fields for the File R/W skill (absent for universal-file-access)
+    permission_level?: 'read' | 'write' | 'delete';
+    operation?:       string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    diff?:            any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    target_stats?:    any[];
+    permanent_delete?: boolean;
   } | null;
 }
 

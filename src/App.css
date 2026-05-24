@@ -243,3 +243,75 @@
   transform: translateY(0.15em);
   width: 2px;
 }
+
+/* ── DiffViewer — Pygments syntax token colours ──────────────────────────── */
+/* These classes are emitted by the Python diff_engine.py tokeniser and
+   applied to individual spans inside DiffViewer.tsx code diffs. */
+
+.diff-tok-kw   { color: #569cd6; }          /* keyword */
+.diff-tok-kwd  { color: #569cd6; }          /* keyword.declaration */
+.diff-tok-kwt  { color: #569cd6; }          /* keyword.type */
+.diff-tok-kwn  { color: #569cd6; }          /* keyword.namespace */
+.diff-tok-kwo  { color: #ce9178; }          /* keyword.other */
+.diff-tok-str  { color: #ce9178; }          /* string */
+.diff-tok-s    { color: #ce9178; }          /* string (generic) */
+.diff-tok-s1   { color: #ce9178; }
+.diff-tok-s2   { color: #ce9178; }
+.diff-tok-sb   { color: #ce9178; }
+.diff-tok-sc   { color: #ce9178; }
+.diff-tok-sd   { color: #7ec8e3; font-style: italic; }  /* string.doc */
+.diff-tok-se   { color: #d7ba7d; }          /* string.escape */
+.diff-tok-sh   { color: #ce9178; }
+.diff-tok-si   { color: #d7ba7d; }          /* string.interpol */
+.diff-tok-sx   { color: #ce9178; }
+.diff-tok-sr   { color: #d16969; }          /* string.regex */
+.diff-tok-ss   { color: #ce9178; }
+.diff-tok-num  { color: #b5cea8; }          /* number */
+.diff-tok-n    { color: #9cdcfe; }          /* name */
+.diff-tok-na   { color: #9cdcfe; }          /* name.attribute */
+.diff-tok-nb   { color: #9cdcfe; }          /* name.builtin */
+.diff-tok-nc   { color: #4ec9b0; }          /* name.class */
+.diff-tok-nd   { color: #dcdcaa; }          /* name.decorator */
+.diff-tok-ne   { color: #4ec9b0; }          /* name.exception */
+.diff-tok-nf   { color: #dcdcaa; }          /* name.function */
+.diff-tok-ni   { color: #9cdcfe; }          /* name.entity */
+.diff-tok-nl   { color: #9cdcfe; }          /* name.label */
+.diff-tok-nn   { color: #4ec9b0; }          /* name.namespace */
+.diff-tok-nt   { color: #569cd6; }          /* name.tag */
+.diff-tok-nv   { color: #9cdcfe; }          /* name.variable */
+.diff-tok-nvc  { color: #9cdcfe; }
+.diff-tok-nvg  { color: #9cdcfe; }
+.diff-tok-nvi  { color: #9cdcfe; }
+.diff-tok-op   { color: #d4d4d4; }          /* operator */
+.diff-tok-cmt  { color: #6a9955; font-style: italic; } /* comment */
+.diff-tok-cm   { color: #6a9955; font-style: italic; }
+.diff-tok-c1   { color: #6a9955; font-style: italic; }
+.diff-tok-cs   { color: #6a9955; font-style: italic; }
+.diff-tok-cp   { color: #9b9b9b; }          /* comment.preproc */
+.diff-tok-p    { color: #d4d4d4; }          /* punctuation */
+.diff-tok-err  { color: #f44747; }          /* error */
+.diff-tok-esc  { color: #d4d4d4; }          /* escape */
+.diff-tok-x    { color: #d4d4d4; }          /* other */
+
+/* ── DiffViewer — character-level diff highlights ────────────────────────── */
+
+/* Changed chars in a deleted line */
+.diff-char-del {
+  background-color: rgba(239, 68, 68, 0.35);
+  border-radius: 2px;
+}
+
+/* Changed chars in an added line */
+.diff-char-add {
+  background-color: rgba(34, 197, 94, 0.35);
+  border-radius: 2px;
+}
+
+/* Dark mode intensifies the highlights slightly */
+.dark .diff-char-del {
+  background-color: rgba(239, 68, 68, 0.40);
+}
+
+.dark .diff-char-add {
+  background-color: rgba(34, 197, 94, 0.40);
+}

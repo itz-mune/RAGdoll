@@ -37,4 +37,9 @@ dependencies = [
     "rapidfuzz>=3.0.0",
     "rank-bm25>=0.2.2",
     "msgpack>=1.1.0",
+    "diff-match-patch>=20230430",
+    "pygments>=2.18.0",
+    "send2trash>=1.8.3",
+    "psutil>=6.0.0",
+    "chardet>=5.2.0",
 ]

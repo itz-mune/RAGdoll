@@ -188,19 +188,29 @@ export function MarketplacePage() {
                 <RegistryEmpty onRetry={marketplace.refresh} hasQuery={!!query} />
               ) : (
                 <div className="grid grid-cols-3 gap-3">
-                  {filteredRegistry.map((plugin) => (
-                    <PluginCard
-                      key={plugin.id}
-                      plugin={plugin}
-                      isInstalled={!!installedMap[plugin.id]}
-                      hasUpdate={marketplace.availableUpdates.has(plugin.id)}
-                      installing={marketplace.installing === plugin.id}
-                      updating={marketplace.updating === plugin.id}
-                      onInstall={() => marketplace.installPlugin(plugin)}
-                      onUpdate={() => marketplace.updatePlugin(plugin)}
-                      onViewDetail={() => setDetailPlugin(plugin)}
-                    />
-                  ))}
+                  {filteredRegistry.map((plugin) => {
+                    // Compute friendly names for any unmet dependencies
+                    const missingDeps = (plugin.requires ?? [])
+                      .filter((depId) => !installedMap[depId])
+                      .map((depId) => {
+                        const reg = marketplace.registry.find((r) => r.id === depId);
+                        return reg?.name ?? depId;
+                      });
+                    return (
+                      <PluginCard
+                        key={plugin.id}
+                        plugin={plugin}
+                        isInstalled={!!installedMap[plugin.id]}
+                        hasUpdate={marketplace.availableUpdates.has(plugin.id)}
+                        installing={marketplace.installing === plugin.id}
+                        updating={marketplace.updating === plugin.id}
+                        missingDeps={missingDeps}
+                        onInstall={() => marketplace.installPlugin(plugin)}
+                        onUpdate={() => marketplace.updatePlugin(plugin)}
+                        onViewDetail={() => setDetailPlugin(plugin)}
+                      />
+                    );
+                  })}
                 </div>
               )}
             </motion.div>
@@ -293,12 +303,14 @@ export function MarketplacePage() {
 
 // ── Plugin card (browse grid) ─────────────────────────────────────────────────
 
-function PluginCard({ plugin, isInstalled, hasUpdate, installing, updating, onInstall, onUpdate, onViewDetail }: {
+function PluginCard({ plugin, isInstalled, hasUpdate, installing, updating, missingDeps, onInstall, onUpdate, onViewDetail }: {
   plugin: RegistryPlugin; isInstalled: boolean; hasUpdate: boolean;
   installing: boolean; updating: boolean;
+  missingDeps: string[];   // display names of unmet dependencies
   onInstall: () => void; onUpdate: () => void; onViewDetail: () => void;
 }) {
   const color = CATEGORY_COLORS[plugin.category] ?? 'bg-muted text-muted-foreground';
+  const hasMissingDeps = !isInstalled && missingDeps.length > 0;
   return (
     <div
       onClick={onViewDetail}
@@ -315,6 +327,17 @@ function PluginCard({ plugin, isInstalled, hasUpdate, installing, updating, onIn
         </div>
       </div>
       <p className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">{plugin.description}</p>
+
+      {/* Dependency warning — only when not yet installed and deps are missing */}
+      {hasMissingDeps && (
+        <div className="flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1">
+          <AlertCircle className="h-3 w-3 shrink-0 text-amber-500" />
+          <p className="text-[10px] text-amber-400 leading-tight">
+            Requires: {missingDeps.join(', ')}
+          </p>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-2 pt-0.5">
         <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium capitalize', color)}>
           {plugin.category}

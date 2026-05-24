@@ -10,7 +10,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { chatStore, type Message, type MemoryChunk } from '@/store/chatStore';
 import { DocumentViewerModal } from '@/components/memory/DocumentViewerModal';
 import { FilePermissionDialog } from '@/components/skills/FilePermissionDialog';
+import { FileRWPermissionDialog } from '@/components/skills/FileRWPermissionDialog';
 import { FileResultDisplay, parseFileResults } from '@/components/skills/FileResultDisplay';
+import { FilePropertiesCard, parseFileStats } from '@/components/skills/FilePropertiesCard';
+import { FileOperationResult, parseFileOp } from '@/components/skills/FileOperationResult';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/hooks/useChat';
@@ -219,7 +222,12 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
   // Parse __RAGDOLL_FILES__ marker out of assistant messages
   const { before: contentBefore, results: fileResults, after: contentAfter } =
     !isUser ? parseFileResults(rawContent) : { before: rawContent, results: null, after: '' };
-  const displayContent = isUser ? rawContent : contentBefore;
+  // Parse __RAGDOLL_FILE_STATS__ and __RAGDOLL_FILE_OP__ markers
+  const { before: statsTextBefore, stats: fileStats, after: statsTextAfter } =
+    !isUser ? parseFileStats(contentBefore) : { before: contentBefore, stats: null, after: '' };
+  const { before: opTextBefore, payload: fileOp, after: opTextAfter } =
+    !isUser ? parseFileOp(statsTextBefore) : { before: statsTextBefore, payload: null, after: '' };
+  const displayContent = isUser ? rawContent : opTextBefore;
 
   // Handler for the inline FilePermissionDialog
   const handlePermissionResolve = useCallback(
@@ -276,13 +284,24 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
         </div>
       )}
 
-      {/* Inline permission dialog — shown mid-stream while the skill awaits user decision */}
+      {/* Inline permission dialog — shown mid-stream while the skill awaits user decision.
+          File R/W write/delete operations use the richer FileRWPermissionDialog;
+          basic universal-file-access uses the simpler FilePermissionDialog. */}
       {!isUser && message.pendingPermission && (
         <div className="w-full max-w-[72%]">
-          <FilePermissionDialog
-            permission={message.pendingPermission}
-            onResolve={handlePermissionResolve}
-          />
+          {(message.pendingPermission.permission_level === 'write' ||
+            message.pendingPermission.permission_level === 'delete') ? (
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            <FileRWPermissionDialog
+              permission={message.pendingPermission as any}
+              onResolve={handlePermissionResolve}
+            />
+          ) : (
+            <FilePermissionDialog
+              permission={message.pendingPermission}
+              onResolve={handlePermissionResolve}
+            />
+          )}
         </div>
       )}
 
@@ -372,10 +391,12 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
           <FileResultDisplay results={fileResults} />
         )}
 
-        {/* "after marker" text (any text following the file results block) */}
-        {contentAfter && !isUser && (
+        {/* "after marker" text (any text following each parsed marker block) */}
+        {(opTextAfter || statsTextAfter || contentAfter) && !isUser && (
           <div className="prose prose-sm dark:prose-invert max-w-none mt-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{contentAfter}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {[opTextAfter, statsTextAfter, contentAfter].filter(Boolean).join('\n\n')}
+            </ReactMarkdown>
           </div>
         )}
 
@@ -469,6 +490,20 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
           <SourceCitations memoryChunks={message.memoryChunks} citations={message.citations} />
         )}
       </div>
+
+      {/* File properties card — emitted by file_rw stats operation */}
+      {fileStats && !isUser && (
+        <div className="w-full max-w-[72%] mt-1">
+          <FilePropertiesCard stats={fileStats} />
+        </div>
+      )}
+
+      {/* File operation result — emitted by file_rw write/patch/delete operations */}
+      {fileOp && !isUser && (
+        <div className="w-full max-w-[72%] mt-1">
+          <FileOperationResult payload={fileOp} />
+        </div>
+      )}
     </motion.div>
   );
 }

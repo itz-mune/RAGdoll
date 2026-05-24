@@ -828,6 +828,85 @@ async def uf_index_rebuild(background_tasks: BackgroundTasks) -> dict:
     return {"status": "building"}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# File R/W skill — undo, backup management, and permission response extension
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _UndoRequest(BaseModel):
+    path: str
+
+
+@app.post("/files/undo")
+async def files_undo(req: _UndoRequest) -> dict:
+    """Restore {path} from its .ragdoll_backup file (created by the File R/W skill)."""
+    from plugins.loader import _plugins_dir
+    import sys as _sys, importlib
+    plugin_dir = _plugins_dir() / "file-rw"
+    if not plugin_dir.exists():
+        raise HTTPException(status_code=404, detail="file-rw plugin not installed")
+    if str(plugin_dir) not in _sys.path:
+        _sys.path.insert(0, str(plugin_dir))
+    file_ops = importlib.import_module("file_ops")
+    ops = file_ops.FileOps()
+    ok, message = await ops.undo_write(req.path)
+    return {"ok": ok, "message": message}
+
+
+@app.delete("/plugins/file-rw/backups/clear")
+async def frw_clear_backups() -> dict:
+    """Delete all .ragdoll_backup files from standard user directories."""
+    import glob as _glob
+    from plugins.loader import _plugins_dir
+    from plugins.state import get_plugin_config
+    try:
+        cfg = get_plugin_config("file-rw")
+        # Scan the same dirs the indexer watches, plus the plugin dir
+        from pathlib import Path
+        home = Path.home()
+        scan_dirs = [
+            home / "Documents", home / "Desktop", home / "Downloads",
+            home / "OneDrive", home / "Pictures",
+        ]
+        count = 0
+        freed = 0
+        for d in scan_dirs:
+            if not d.exists():
+                continue
+            for bk in d.rglob("*.ragdoll_backup"):
+                try:
+                    freed += bk.stat().st_size
+                    bk.unlink()
+                    count += 1
+                except OSError:
+                    pass
+        return {"ok": True, "count": count, "freed_bytes": freed}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/plugins/file-rw/stats")
+async def frw_stats() -> dict:
+    """Return count and total size of .ragdoll_backup files."""
+    from pathlib import Path
+    home = Path.home()
+    scan_dirs = [
+        home / "Documents", home / "Desktop", home / "Downloads",
+        home / "OneDrive", home / "Pictures",
+    ]
+    count = 0
+    size  = 0
+    for d in scan_dirs:
+        if not d.exists():
+            continue
+        for bk in d.rglob("*.ragdoll_backup"):
+            try:
+                count += 1
+                size  += bk.stat().st_size
+            except OSError:
+                pass
+    return {"backups_count": count, "backups_size_bytes": size}
+
+
 @app.delete("/plugins/universal-file-access/index")
 async def uf_index_clear() -> dict:
     try:

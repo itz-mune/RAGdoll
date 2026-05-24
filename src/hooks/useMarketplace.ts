@@ -21,6 +21,7 @@ export interface RegistryPlugin {
   min_ragdoll_version: string;
   tags: string[];
   preinstalled?: boolean;
+  requires?: string[];  // IDs of plugins this one depends on
 }
 
 export interface PluginAction {
@@ -49,6 +50,7 @@ export interface InstalledPlugin {
   changelog: Record<string, string>;
   config_fields: ConfigField[];
   actions?: PluginAction[];
+  requires?: string[];           // IDs of plugins this one depends on
   is_enabled: boolean;
   is_preinstalled: boolean;
   installed_at: number;

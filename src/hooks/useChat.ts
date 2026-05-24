@@ -63,6 +63,14 @@ interface SseEvent {
   files?: string[];
   is_critical?: boolean;
   file_count?: number;
+  // File R/W extended permission fields
+  permission_level?: 'read' | 'write' | 'delete';
+  operation?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  diff?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  target_stats?: any[];
+  permanent_delete?: boolean;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -230,11 +238,17 @@ export function useChat(): UseChatReturn {
               chatStore.getState().setToolCallsUsed(streamingMessageId, event.tools ?? []);
             } else if (evType === 'permission_request') {
               chatStore.getState().setPendingPermission(streamingMessageId, {
-                id: event.id ?? '',
-                files: event.files ?? [],
-                is_critical: event.is_critical ?? false,
-                resolved: false,
-                approved: null,
+                id:               event.id ?? '',
+                files:            event.files ?? [],
+                is_critical:      event.is_critical ?? false,
+                resolved:         false,
+                approved:         null,
+                // File R/W extended fields (undefined for universal-file-access)
+                permission_level: event.permission_level,
+                operation:        event.operation,
+                diff:             event.diff,
+                target_stats:     event.target_stats,
+                permanent_delete: event.permanent_delete,
               });
             } else if (evType === 'plugin_install') {
               chatStore.getState().setInstallingPlugin(streamingMessageId, {

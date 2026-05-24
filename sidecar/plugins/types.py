@@ -28,6 +28,7 @@ class PluginManifest:
     changelog: dict[str, str] = field(default_factory=dict)
     config_fields: list[dict] = field(default_factory=list)
     actions: list[dict] = field(default_factory=list)
+    requires: list[str] = field(default_factory=list)   # plugin IDs this plugin depends on
 
     @classmethod
     def from_dict(cls, data: dict) -> "PluginManifest":
@@ -46,6 +47,7 @@ class PluginManifest:
             changelog=data.get("changelog", {}),
             config_fields=data.get("config_fields", []),
             actions=data.get("actions", []),
+            requires=data.get("requires", []),
         )
 
 
@@ -73,6 +75,7 @@ class InstalledPlugin:
             "changelog": self.manifest.changelog,
             "config_fields": self.manifest.config_fields,
             "actions": self.manifest.actions,
+            "requires": self.manifest.requires,
             "is_enabled": self.is_enabled,
             "is_preinstalled": self.is_preinstalled,
             "installed_at": self.installed_at,
