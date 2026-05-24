@@ -1049,6 +1049,26 @@ async def _stream_response(
             )
             style_suffix = skill_finder_policy + ("\n\n" + style_suffix if style_suffix else "")
 
+        # Inject file-search policy when universal-file-access is active.
+        # Without this the LLM falls back on its safety training ("I don't have
+        # access to your file system") even when the search_files tool is loaded.
+        has_file_search = any(
+            getattr(t, "name", "") == "search_files"
+            for t in (plugin_tools or [])
+        )
+        if has_file_search:
+            file_search_policy = (
+                "FILE SEARCH POLICY (applies to every message):\n"
+                "You have a search_files tool that can find any file on the user's computer.\n"
+                "ALWAYS call search_files when the user asks you to find, locate, open, or access\n"
+                "a file, document, image, video, spreadsheet, or any local item — even if they say\n"
+                "things like 'on my desktop', 'in my downloads', 'the one I made last week', etc.\n"
+                "NEVER say you cannot access the file system. NEVER ask the user to find the file\n"
+                "themselves. NEVER explain how to use File Explorer or Finder.\n"
+                "Instead: call search_files(query) immediately. The tool handles permissions."
+            )
+            style_suffix = file_search_policy + ("\n\n" + style_suffix if style_suffix else "")
+
         system_prompt_text = build_system_prompt(retrieval, summary, style_suffix)
 
         # 7. Check semantic response cache
