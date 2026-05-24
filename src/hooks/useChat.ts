@@ -58,6 +58,11 @@ interface SseEvent {
   tools?: string[];
   plugin_name?: string;
   plugin_id?: string;
+  // Permission request
+  id?: string;
+  files?: string[];
+  is_critical?: boolean;
+  file_count?: number;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
@@ -223,6 +228,14 @@ export function useChat(): UseChatReturn {
 
             if (evType === 'tool_use') {
               chatStore.getState().setToolCallsUsed(streamingMessageId, event.tools ?? []);
+            } else if (evType === 'permission_request') {
+              chatStore.getState().setPendingPermission(streamingMessageId, {
+                id: event.id ?? '',
+                files: event.files ?? [],
+                is_critical: event.is_critical ?? false,
+                resolved: false,
+                approved: null,
+              });
             } else if (evType === 'plugin_install') {
               chatStore.getState().setInstallingPlugin(streamingMessageId, {
                 name: event.plugin_name ?? event.plugin_id ?? 'Plugin',

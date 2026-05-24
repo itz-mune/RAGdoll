@@ -21,7 +21,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import type { InstalledPlugin, ConfigField } from '@/hooks/useMarketplace';
+import type { InstalledPlugin, ConfigField, PluginAction } from '@/hooks/useMarketplace';
 
 const SIDECAR = 'http://127.0.0.1:8765';
 
@@ -44,6 +44,8 @@ export function PluginSettingsDrawer({ plugin, open, onClose }: PluginSettingsDr
   const [saving, setSaving]             = useState(false);
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [resetOpen, setResetOpen]       = useState(false);
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [confirmAction, setConfirmAction] = useState<PluginAction | null>(null);
 
   // ── Load saved config when the drawer opens ──────────────────────────────────
   useEffect(() => {
@@ -130,6 +132,21 @@ export function PluginSettingsDrawer({ plugin, open, onClose }: PluginSettingsDr
     }
   };
 
+  // ── Action runner ─────────────────────────────────────────────────────────────
+  const runAction = async (action: PluginAction) => {
+    setActionLoading((prev) => ({ ...prev, [action.id]: true }));
+    try {
+      const r = await fetch(`${SIDECAR}${action.endpoint}`, { method: action.method });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      toast.success(`${action.label} — done`);
+    } catch {
+      toast.error(`${action.label} failed`);
+    } finally {
+      setActionLoading((prev) => ({ ...prev, [action.id]: false }));
+      setConfirmAction(null);
+    }
+  };
+
   // ── Field change helper ───────────────────────────────────────────────────────
   const setField = (key: string, val: FieldValue) => {
     setValues((prev) => ({ ...prev, [key]: val }));
@@ -139,6 +156,7 @@ export function PluginSettingsDrawer({ plugin, open, onClose }: PluginSettingsDr
   if (!plugin) return null;
 
   return (
+    <>
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent className="flex w-[360px] flex-col p-0 gap-0">
 
@@ -163,6 +181,41 @@ export function PluginSettingsDrawer({ plugin, open, onClose }: PluginSettingsDr
               onChange={(val) => setField(f.key, val)}
             />
           ))}
+
+          {/* Actions (e.g. rebuild index, clear cache) */}
+          {plugin.actions && plugin.actions.length > 0 && (
+            <div className="space-y-2 border-t border-border/40 pt-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Actions
+              </p>
+              {plugin.actions.map((action) => (
+                <div key={action.id} className="space-y-0.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-start text-sm"
+                    disabled={!!actionLoading[action.id]}
+                    onClick={() => {
+                      if (action.confirm) {
+                        setConfirmAction(action);
+                      } else {
+                        runAction(action);
+                      }
+                    }}
+                  >
+                    {actionLoading[action.id]
+                      ? (action.loading_label ?? 'Working…')
+                      : action.label}
+                  </Button>
+                  {action.description && (
+                    <p className="text-[11px] leading-relaxed text-muted-foreground pl-0.5">
+                      {action.description}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Footer — sticky */}
@@ -198,6 +251,27 @@ export function PluginSettingsDrawer({ plugin, open, onClose }: PluginSettingsDr
 
       </SheetContent>
     </Sheet>
+
+    {/* Confirm dialog for destructive actions */}
+    <AlertDialog open={!!confirmAction} onOpenChange={(o) => !o && setConfirmAction(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{confirmAction?.label}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {confirmAction?.confirm_message ?? 'Are you sure?'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => confirmAction && runAction(confirmAction)}
+          >
+            Confirm
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 

@@ -27,6 +27,13 @@ export interface Message {
   thinkingDuration?: number | null;   // seconds
   toolCallsUsed?: string[];           // tool names used to produce this message
   installingPlugin?: { name: string; id: string } | null; // set while a plugin is being installed
+  pendingPermission?: {
+    id: string;
+    files: string[];
+    is_critical: boolean;
+    resolved: boolean;
+    approved: boolean | null;
+  } | null;
 }
 
 export interface Conversation {
@@ -69,6 +76,8 @@ interface ChatStore {
   finalizeThinking: (messageId: string, durationSeconds: number) => void;
   setToolCallsUsed: (messageId: string, tools: string[]) => void;
   setInstallingPlugin: (messageId: string, plugin: { name: string; id: string } | null) => void;
+  setPendingPermission: (messageId: string, perm: NonNullable<Message['pendingPermission']>) => void;
+  resolvePendingPermission: (messageId: string, approved: boolean) => void;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -244,6 +253,43 @@ export const useChatStore = create<ChatStore>()(
             ...state.messages,
             [activeConvId]: (state.messages[activeConvId] ?? []).map((msg) =>
               msg.id === messageId ? { ...msg, installingPlugin: plugin } : msg
+            ),
+          },
+        };
+      }),
+
+    setPendingPermission: (messageId, perm) =>
+      set((state) => {
+        const activeConvId = state.activeConversationId;
+        if (!activeConvId) return state;
+        return {
+          messages: {
+            ...state.messages,
+            [activeConvId]: (state.messages[activeConvId] ?? []).map((msg) =>
+              msg.id === messageId ? { ...msg, pendingPermission: perm } : msg
+            ),
+          },
+        };
+      }),
+
+    resolvePendingPermission: (messageId, approved) =>
+      set((state) => {
+        const activeConvId = state.activeConversationId;
+        if (!activeConvId) return state;
+        return {
+          messages: {
+            ...state.messages,
+            [activeConvId]: (state.messages[activeConvId] ?? []).map((msg) =>
+              msg.id === messageId && msg.pendingPermission
+                ? {
+                    ...msg,
+                    pendingPermission: {
+                      ...msg.pendingPermission,
+                      resolved: true,
+                      approved,
+                    },
+                  }
+                : msg
             ),
           },
         };

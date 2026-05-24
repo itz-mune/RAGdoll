@@ -27,6 +27,7 @@ class PluginManifest:
     long_description: str = ""
     changelog: dict[str, str] = field(default_factory=dict)
     config_fields: list[dict] = field(default_factory=list)
+    actions: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> "PluginManifest":
@@ -44,6 +45,7 @@ class PluginManifest:
             long_description=data.get("long_description", ""),
             changelog=data.get("changelog", {}),
             config_fields=data.get("config_fields", []),
+            actions=data.get("actions", []),
         )
 
 
@@ -70,6 +72,7 @@ class InstalledPlugin:
             "long_description": self.manifest.long_description,
             "changelog": self.manifest.changelog,
             "config_fields": self.manifest.config_fields,
+            "actions": self.manifest.actions,
             "is_enabled": self.is_enabled,
             "is_preinstalled": self.is_preinstalled,
             "installed_at": self.installed_at,

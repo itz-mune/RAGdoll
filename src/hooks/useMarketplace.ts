@@ -23,6 +23,17 @@ export interface RegistryPlugin {
   preinstalled?: boolean;
 }
 
+export interface PluginAction {
+  id: string;
+  label: string;
+  description?: string;
+  endpoint: string;
+  method: 'GET' | 'POST' | 'DELETE';
+  confirm?: boolean;
+  confirm_message?: string;
+  loading_label?: string;
+}
+
 export interface InstalledPlugin {
   id: string;
   name: string;
@@ -37,6 +48,7 @@ export interface InstalledPlugin {
   long_description: string;
   changelog: Record<string, string>;
   config_fields: ConfigField[];
+  actions?: PluginAction[];
   is_enabled: boolean;
   is_preinstalled: boolean;
   installed_at: number;

@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from db import ConversationModel, ConversationSummary, MessageModel, engine, init_db
+from permissions_bus import permission_context, respond_to_permission
 
 # ── Global state ──────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_cleanup_temp_docs())
     _sidecar_stage = "warming_up"
     asyncio.create_task(_warm_embed_model_bg())
+    asyncio.create_task(_init_file_index_bg())
 
     # Yield immediately so uvicorn opens the port and /health starts responding
     yield
@@ -96,6 +98,27 @@ async def _warm_embed_model_bg():
     global _sidecar_stage
     await _warm_embed_model()
     _sidecar_stage = "ready"
+
+
+async def _init_file_index_bg():
+    """Initialise the Universal File Access index after startup (best-effort)."""
+    try:
+        from plugins.state import get_plugin_config
+        cfg = get_plugin_config("universal-file-access")
+        from plugins.loader import _plugins_dir
+        plugin_dir = _plugins_dir() / "universal-file-access"
+        if not plugin_dir.exists():
+            return  # plugin not installed yet
+        import importlib.util, sys as _sys
+        if str(plugin_dir) not in _sys.path:
+            _sys.path.insert(0, str(plugin_dir))
+        spec = importlib.util.spec_from_file_location("_uf_indexer", plugin_dir / "indexer.py")
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            await mod.init_index(cfg)
+    except Exception as exc:
+        print(f"[RAGdoll] File index init skipped: {exc}")
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -749,6 +772,85 @@ async def install_plugin_endpoint(body: PluginInstallRequest) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Permission bus
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PermissionResponseRequest(BaseModel):
+    request_id: str
+    approved: bool
+
+
+@app.post("/permissions/respond")
+async def permissions_respond(body: PermissionResponseRequest) -> dict:
+    found = respond_to_permission(body.request_id, body.approved)
+    return {"ok": found}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Universal File Access index management
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/plugins/universal-file-access/index/stats")
+async def uf_index_stats() -> dict:
+    try:
+        from plugins.loader import _plugins_dir
+        import sys as _sys, importlib.util as _ilu
+        plugin_dir = _plugins_dir() / "universal-file-access"
+        if str(plugin_dir) not in _sys.path:
+            _sys.path.insert(0, str(plugin_dir))
+        spec = _ilu.spec_from_file_location("_uf_indexer_s", plugin_dir / "indexer.py")
+        if not spec or not spec.loader:
+            return {"error": "plugin not installed"}
+        mod = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod.get_index_stats()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/plugins/universal-file-access/index/rebuild")
+async def uf_index_rebuild(background_tasks: BackgroundTasks) -> dict:
+    async def _do_rebuild():
+        try:
+            from plugins.loader import _plugins_dir
+            from plugins.state import get_plugin_config
+            import sys as _sys, importlib.util as _ilu
+            plugin_dir = _plugins_dir() / "universal-file-access"
+            if str(plugin_dir) not in _sys.path:
+                _sys.path.insert(0, str(plugin_dir))
+            spec = _ilu.spec_from_file_location("_uf_indexer_r", plugin_dir / "indexer.py")
+            if spec and spec.loader:
+                mod = _ilu.module_from_spec(spec)
+                spec.loader.exec_module(mod)  # type: ignore[union-attr]
+                cfg = get_plugin_config("universal-file-access")
+                stats = await mod.build_index(cfg)
+                print(f"[RAGdoll] File index rebuilt: {stats.files_indexed} files")
+        except Exception as exc:
+            print(f"[RAGdoll] Index rebuild failed: {exc}")
+
+    asyncio.create_task(_do_rebuild())
+    return {"status": "building"}
+
+
+@app.delete("/plugins/universal-file-access/index")
+async def uf_index_clear() -> dict:
+    try:
+        from plugins.loader import _plugins_dir
+        import sys as _sys, importlib.util as _ilu
+        plugin_dir = _plugins_dir() / "universal-file-access"
+        if str(plugin_dir) not in _sys.path:
+            _sys.path.insert(0, str(plugin_dir))
+        spec = _ilu.spec_from_file_location("_uf_indexer_c", plugin_dir / "indexer.py")
+        if spec and spec.loader:
+            mod = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)  # type: ignore[union-attr]
+            mod.clear_index()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Dashboard
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1038,6 +1140,10 @@ async def _stream_response(
             async for state in graph.astream(initial_state, stream_mode="values"):
                 final_state_box[0] = state
 
+        # Make the permission bus available inside the graph task.
+        # asyncio.create_task() copies the current Context, so the ContextVar
+        # is automatically inherited by the task (and by any tool _arun calls).
+        permission_context.set(event_queue)
         graph_task = asyncio.create_task(_run_graph())
         while not graph_task.done():
             try:

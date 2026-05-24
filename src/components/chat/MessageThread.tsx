@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, ThumbsUp, ThumbsDown, ChevronDown, Check, FileText, FileSpreadsheet, Braces, FileCode, RotateCcw } from 'lucide-react';
 import { ThinkingBlock } from '@/components/chat/ThinkingBlock';
 import { ToolCallIndicator, SkillLoadingIndicator } from '@/components/chat/ToolCallIndicator';
@@ -9,6 +9,8 @@ import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'framer-motion';
 import { chatStore, type Message, type MemoryChunk } from '@/store/chatStore';
 import { DocumentViewerModal } from '@/components/memory/DocumentViewerModal';
+import { FilePermissionDialog } from '@/components/skills/FilePermissionDialog';
+import { FileResultDisplay, parseFileResults } from '@/components/skills/FileResultDisplay';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/hooks/useChat';
@@ -211,8 +213,23 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
   const isUser = message.role === 'user';
   const activeConversationId = chatStore((state) => state.activeConversationId);
   const visibleUserMessage = isUser ? getVisibleUserMessage(message) : null;
-  const displayContent = visibleUserMessage?.content ?? message.content;
+  const rawContent = visibleUserMessage?.content ?? message.content;
   const attachedFileNames = visibleUserMessage?.fileNames ?? message.attachedFileNames ?? [];
+
+  // Parse __RAGDOLL_FILES__ marker out of assistant messages
+  const { before: contentBefore, results: fileResults, after: contentAfter } =
+    !isUser ? parseFileResults(rawContent) : { before: rawContent, results: null, after: '' };
+  const displayContent = isUser ? rawContent : contentBefore;
+
+  // Handler for the inline FilePermissionDialog
+  const handlePermissionResolve = useCallback(
+    (approved: boolean) => {
+      if (activeConversationId) {
+        chatStore.getState().resolvePendingPermission(message.id, approved);
+      }
+    },
+    [message.id, activeConversationId]
+  );
 
   const handleCopy = async (text: string) => {
     await navigator.clipboard.writeText(text);
@@ -258,6 +275,17 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
           />
         </div>
       )}
+
+      {/* Inline permission dialog — shown mid-stream while the skill awaits user decision */}
+      {!isUser && message.pendingPermission && (
+        <div className="w-full max-w-[72%]">
+          <FilePermissionDialog
+            permission={message.pendingPermission}
+            onResolve={handlePermissionResolve}
+          />
+        </div>
+      )}
+
       <div
         className={cn(
           'group relative min-w-0 max-w-[72%] overflow-hidden rounded-xl px-4 py-3',
@@ -336,6 +364,18 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
             >
               {displayContent}
             </ReactMarkdown>
+          </div>
+        )}
+
+        {/* File result cards — emitted by the universal-file-access skill */}
+        {fileResults && fileResults.length > 0 && (
+          <FileResultDisplay results={fileResults} />
+        )}
+
+        {/* "after marker" text (any text following the file results block) */}
+        {contentAfter && !isUser && (
+          <div className="prose prose-sm dark:prose-invert max-w-none mt-2">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{contentAfter}</ReactMarkdown>
           </div>
         )}
 

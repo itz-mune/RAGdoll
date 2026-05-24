@@ -33,4 +33,8 @@ dependencies = [
     "stability-sdk>=0.8.5",
     "requests>=2.32.0",
     "setuptools>=82.0.1",
+    "watchdog>=4.0.0",
+    "rapidfuzz>=3.0.0",
+    "rank-bm25>=0.2.2",
+    "msgpack>=1.1.0",
 ]
