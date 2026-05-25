@@ -49,12 +49,23 @@ export function FirstRunSetup({ onComplete }: FirstRunSetupProps) {
         {/* ── Welcome ── */}
         {step === 'welcome' && (
           <div className="space-y-8 py-8">
-            <div className="space-y-4">
-              <h1 className="text-5xl font-bold text-foreground">Welcome to RAGdoll</h1>
-              <p className="text-xl font-semibold text-primary">Your Private, Local-First RAG Intelligence</p>
-              <p className="mx-auto max-w-md text-sm leading-relaxed text-muted-foreground">
-                Transform your documents into intelligent insights. No data leaves your device. No subscriptions required.
-              </p>
+            <div className="space-y-6">
+              {/* Logo */}
+              <div className="mx-auto flex items-center justify-center">
+                <img
+                  src="/main_logo_white.svg"
+                  alt="RAGdoll"
+                  className="h-28 w-28 drop-shadow-[0_0_24px_rgba(255,255,255,0.18)]"
+                  draggable={false}
+                />
+              </div>
+              <div className="space-y-3">
+                <h1 className="text-5xl font-bold tracking-tight text-foreground">RAGdoll</h1>
+                <p className="text-xl font-semibold text-primary">Your Private, Local-First RAG Intelligence</p>
+                <p className="mx-auto max-w-md text-sm leading-relaxed text-muted-foreground">
+                  Transform your documents into intelligent insights. No data leaves your device. No subscriptions required.
+                </p>
+              </div>
             </div>
             <button
               onClick={() => setStep('terms')}
