@@ -13,6 +13,8 @@
     "raw_base": "https://raw.githubusercontent.com/itz-mune/RAGdoll-plugins/main",
     "preinstalled": [
       "skill-finder",
+      "file-rw",
+      "universal-file-access",
       "web-search",
       "image-viewer",
       "url-fetcher",

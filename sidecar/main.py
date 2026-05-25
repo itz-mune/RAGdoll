@@ -729,7 +729,15 @@ async def disable_plugin_endpoint(plugin_id: str) -> dict:
 
 @app.post("/plugins/{plugin_id}/uninstall")
 async def uninstall_plugin_endpoint(plugin_id: str) -> dict:
-    from plugins.loader import uninstall_plugin
+    from plugins.loader import uninstall_plugin, _ensure_loaded
+    from fastapi import HTTPException
+    plugins = await asyncio.to_thread(_ensure_loaded)
+    plugin = plugins.get(plugin_id)
+    if plugin and plugin.is_preinstalled:
+        raise HTTPException(
+            status_code=403,
+            detail=f"'{plugin.manifest.name}' is a built-in plugin and cannot be uninstalled.",
+        )
     await asyncio.to_thread(uninstall_plugin, plugin_id)
     return {"status": "uninstalled", "id": plugin_id}
 
