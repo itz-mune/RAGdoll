@@ -3,10 +3,10 @@ import { MainLogo } from '@/components/ui/MainLogo';
 import {
   ArrowLeft, Settings, Cpu, Brain, Palette, Keyboard, Info,
   Trash2, Download, Sun, Moon, Monitor, RefreshCw, X, CheckCircle2, AlertCircle,
+  ArrowRight,
 } from 'lucide-react';
 import { AnimatePresence as AP } from 'framer-motion';
-import { UpdateModal } from '@/components/updater/UpdateModal';
-import { useUpdater } from '@/hooks/useUpdater';
+import { useUpdater, fmtBytes, fmtSpeed, fmtEta } from '@/hooks/useUpdater';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { ModelProfilesSection } from './ModelProfilesSection';
@@ -645,31 +645,23 @@ function ShortcutsSection() {
 }
 
 function AboutSection() {
-  // Use the real hook so downloading/progress are proper React state and the
-  // modal progress bar actually updates during download.
   const updater = useUpdater();
-  const [checking, setChecking] = useState(false);
-  const [checkStatus, setCheckStatus] = useState<'idle' | 'up-to-date' | 'available' | 'error'>('idle');
-  const [modalOpen, setModalOpen] = useState(false);
+  const [checking, setChecking]     = useState(false);
+  const [checkStatus, setCheckStatus] =
+    useState<'idle' | 'up-to-date' | 'available' | 'error'>('idle');
+  const [notesOpen, setNotesOpen]   = useState(false);
 
-  // Open the modal automatically if the background check already found an update
+  // Reflect background-check result in status badge
   useEffect(() => {
-    if (updater.available && checkStatus === 'idle') {
-      setCheckStatus('available');
-    }
+    if (updater.available && checkStatus === 'idle') setCheckStatus('available');
   }, [updater.available]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleCheckUpdates = useCallback(async () => {
+  const handleCheck = useCallback(async () => {
     setChecking(true);
     setCheckStatus('idle');
     try {
       const found = await updater.recheck();
-      if (found) {
-        setCheckStatus('available');
-        setModalOpen(true);
-      } else {
-        setCheckStatus('up-to-date');
-      }
+      setCheckStatus(found ? 'available' : 'up-to-date');
     } catch {
       setCheckStatus('error');
     } finally {
@@ -677,13 +669,20 @@ function AboutSection() {
     }
   }, [updater]);
 
+  const { phase, info, progress, downloadedBytes, totalBytes, speedBps, etaSec, error } = updater;
+  const isDownloading = phase === 'downloading';
+  const isDownloaded  = phase === 'downloaded';
+  const isInstalling  = phase === 'installing';
+
   return (
     <div className="p-6 space-y-6">
       <div>
         <h2 className="text-lg font-semibold">About RAGdoll</h2>
         <p className="text-sm text-muted-foreground">Application information</p>
       </div>
+
       <div className="space-y-4 rounded-xl border border-border/50 bg-muted/20 p-6">
+        {/* App identity */}
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 border border-accent/20">
             <MainLogo size={28} style={{ color: 'var(--accent)' }} aria-hidden />
@@ -710,50 +709,187 @@ function AboutSection() {
           github.com/itz-mune/RAGdoll →
         </a>
 
-        <div className="border-t border-border/50 pt-4 flex flex-wrap items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCheckUpdates}
-            disabled={checking}
-            className="gap-1.5"
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', checking && 'animate-spin')} />
-            {checking ? 'Checking…' : 'Check for updates'}
-          </Button>
+        {/* ── Update row ──────────────────────────────────────────────────── */}
+        <div className="border-t border-border/50 pt-4 space-y-3">
 
-          {checkStatus === 'up-to-date' && (
-            <span className="flex items-center gap-1 text-xs text-green-500">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              You're on the latest version
-            </span>
-          )}
-          {checkStatus === 'available' && (
-            <span className="flex items-center gap-1 text-xs text-primary">
-              <Download className="h-3.5 w-3.5" />
-              {updater.info?.version ? `${updater.info.version} is available` : 'Update available'}
-            </span>
-          )}
-          {checkStatus === 'error' && (
-            <span className="flex items-center gap-1 text-xs text-destructive">
-              <AlertCircle className="h-3.5 w-3.5" />
-              Update check failed
-            </span>
-          )}
+          {/* Check button + status badges */}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCheck}
+              disabled={checking || isDownloading || isInstalling}
+              className="gap-1.5"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', checking && 'animate-spin')} />
+              {checking ? 'Checking…' : 'Check for updates'}
+            </Button>
+
+            {checkStatus === 'up-to-date' && !updater.available && (
+              <span className="flex items-center gap-1 text-xs text-green-500">
+                <CheckCircle2 className="h-3.5 w-3.5" /> You're on the latest version
+              </span>
+            )}
+            {checkStatus === 'error' && (
+              <span className="flex items-center gap-1 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5" /> Update check failed
+              </span>
+            )}
+          </div>
+
+          {/* ── Update card (appears when an update is found) ── */}
+          <AnimatePresence>
+            {updater.available && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.18 }}
+                className="rounded-lg border border-primary/25 bg-primary/5 p-4 space-y-3"
+              >
+                {/* Version + date header */}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      RAGdoll {info?.version}
+                    </p>
+                    {info?.date && (
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(info.date).toLocaleDateString(undefined, {
+                          year: 'numeric', month: 'long', day: 'numeric',
+                        })}
+                      </p>
+                    )}
+                  </div>
+                  {/* Dismiss (only before download starts) */}
+                  {phase === 'idle' && (
+                    <button
+                      onClick={updater.dismiss}
+                      className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                      aria-label="Dismiss"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Release notes toggle */}
+                {info?.body && phase === 'idle' && (
+                  <div>
+                    <button
+                      onClick={() => setNotesOpen((o) => !o)}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      {notesOpen ? 'Hide release notes ▲' : 'Show release notes ▼'}
+                    </button>
+                    <AnimatePresence>
+                      {notesOpen && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="mt-2 max-h-36 overflow-y-auto rounded-md border border-border/40 bg-background/60 p-3">
+                            <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
+                              {info.body}
+                            </p>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                {/* Error */}
+                {error && (
+                  <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    {error}
+                  </p>
+                )}
+
+                {/* ── Phase: idle → Download button ── */}
+                {phase === 'idle' && (
+                  <Button
+                    size="sm"
+                    onClick={updater.startDownload}
+                    className="gap-1.5"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download v{info?.version}
+                  </Button>
+                )}
+
+                {/* ── Phase: downloading → progress bar + stats ── */}
+                {isDownloading && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span className="tabular-nums">
+                        {fmtBytes(downloadedBytes)}
+                        {totalBytes > 0 && ` / ${fmtBytes(totalBytes)}`}
+                      </span>
+                      <span className="flex items-center gap-2 tabular-nums">
+                        {speedBps > 100 && <span>{fmtSpeed(speedBps)}</span>}
+                        {etaSec !== null && (
+                          <span className="text-muted-foreground/70">
+                            {fmtEta(etaSec)} remaining
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    {/* Bar */}
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      {progress > 0 ? (
+                        <div
+                          className="h-full rounded-full bg-primary transition-all duration-150"
+                          style={{ width: `${progress}%` }}
+                        />
+                      ) : (
+                        <div className="h-full animate-pulse rounded-full bg-primary/60" />
+                      )}
+                    </div>
+
+                    {progress > 0 && (
+                      <p className="text-right text-[11px] tabular-nums text-muted-foreground">
+                        {progress}%
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Phase: downloaded → Install button ── */}
+                {isDownloaded && (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="flex items-center gap-1.5 text-xs text-green-500">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {totalBytes > 0
+                        ? `Downloaded (${fmtBytes(totalBytes)})`
+                        : 'Download complete'}
+                    </span>
+                    <Button
+                      size="sm"
+                      onClick={updater.installNow}
+                      className="gap-1.5"
+                    >
+                      <ArrowRight className="h-3.5 w-3.5" />
+                      Install &amp; restart
+                    </Button>
+                  </div>
+                )}
+
+                {/* ── Phase: installing → spinner ── */}
+                {isInstalling && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Installing… the app will restart shortly.
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
-
-      <AP>
-        {modalOpen && (
-          <UpdateModal
-            updater={updater}
-            onClose={() => {
-              setModalOpen(false);
-              updater.dismiss();
-            }}
-          />
-        )}
-      </AP>
     </div>
   );
 }
