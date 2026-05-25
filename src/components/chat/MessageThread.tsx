@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, ThumbsUp, ThumbsDown, ChevronDown, Check, FileText, FileSpreadsheet, Braces, FileCode, RotateCcw } from 'lucide-react';
+import { Copy, ThumbsUp, ThumbsDown, ChevronDown, Check, FileText, FileSpreadsheet, Braces, FileCode, RotateCcw, ImageOff } from 'lucide-react';
 import { ThinkingBlock } from '@/components/chat/ThinkingBlock';
+import { ImageLightbox } from '@/components/chat/ImageLightbox';
 import { ToolCallIndicator, SkillLoadingIndicator } from '@/components/chat/ToolCallIndicator';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -213,6 +214,7 @@ function FileAttachIcon({ name }: { name: string }) {
 
 function MessageBubble({ message, onRegenerate }: { message: Message; onRegenerate?: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const isUser = message.role === 'user';
   const activeConversationId = chatStore((state) => state.activeConversationId);
   const visibleUserMessage = isUser ? getVisibleUserMessage(message) : null;
@@ -340,6 +342,16 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
+                // Inline image — styled thumbnail, opens lightbox on click
+                img({ src, alt }) {
+                  return (
+                    <InlineChatImage
+                      src={src ?? ''}
+                      alt={alt ?? ''}
+                      onOpen={() => setLightbox({ src: src ?? '', alt: alt ?? '' })}
+                    />
+                  );
+                },
                 // v9-compatible code renderer — no `inline` prop
                 code({ className, children, ...props }) {
                   const match = /language-(\w+)/.exec(className ?? '');
@@ -504,9 +516,69 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
           <FileOperationResult payload={fileOp} />
         </div>
       )}
+
+      {/* Image lightbox */}
+      <AnimatePresence>
+        {lightbox && (
+          <ImageLightbox
+            src={lightbox.src}
+            alt={lightbox.alt}
+            onClose={() => setLightbox(null)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
+
+// ─── Inline image thumbnail (inside chat bubble) ─────────────────────────────
+
+function InlineChatImage({
+  src,
+  alt,
+  onOpen,
+}: {
+  src: string;
+  alt: string;
+  onOpen: () => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
+
+  if (error) {
+    return (
+      <span className="my-1.5 inline-flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+        <ImageOff className="h-3 w-3 shrink-0" />
+        {alt || 'Image unavailable'}
+      </span>
+    );
+  }
+
+  return (
+    <span className="my-2 block">
+      {/* Skeleton shown while loading */}
+      {!loaded && (
+        <span className="block h-44 w-72 max-w-full animate-pulse rounded-lg bg-muted/60" />
+      )}
+      <img
+        src={src}
+        alt={alt}
+        onLoad={() => setLoaded(true)}
+        onError={() => setError(true)}
+        onClick={onOpen}
+        title={alt || 'Click to expand'}
+        className={cn(
+          'max-h-64 max-w-full cursor-zoom-in rounded-lg object-cover shadow-sm ring-1 ring-border/30 transition-opacity hover:opacity-90',
+          loaded ? 'block' : 'hidden',
+        )}
+      />
+      {alt && loaded && (
+        <span className="mt-1 block text-[11px] text-muted-foreground italic">{alt}</span>
+      )}
+    </span>
+  );
+}
+
 
 // ─── Source citations (document-only pills + viewer modal) ───────────────────
 
