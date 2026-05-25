@@ -64,6 +64,8 @@ export interface ConfigField {
   help?: string;
   options?: string[];           // 'select' only
   default?: string | number | boolean;
+  /** Show this field only when another field has a specific value. */
+  show_if?: { key: string; value: string };
 }
 
 // ── Version helpers ───────────────────────────────────────────────────────────

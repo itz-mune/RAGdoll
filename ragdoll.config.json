@@ -16,6 +16,7 @@
       "file-rw",
       "universal-file-access",
       "web-search",
+      "image-search",
       "image-viewer",
       "url-fetcher",
       "youtube-transcript"

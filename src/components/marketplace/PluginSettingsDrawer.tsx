@@ -76,11 +76,19 @@ export function PluginSettingsDrawer({ plugin, open, onClose }: PluginSettingsDr
     load();
   }, [plugin, open]);
 
+  // ── show_if helper — returns true when a field should be visible ─────────────
+  const isVisible = (f: { show_if?: { key: string; value: string } }): boolean => {
+    if (!f.show_if) return true;
+    return String(values[f.show_if.key] ?? '') === f.show_if.value;
+  };
+
   // ── Validation ────────────────────────────────────────────────────────────────
   const validate = (): boolean => {
     if (!plugin) return true;
     const errs: Record<string, string> = {};
     for (const f of plugin.config_fields) {
+      // Skip fields hidden by show_if — they're irrelevant for the active config
+      if (!isVisible(f)) continue;
       // Required = no default defined and type is not toggle
       if (f.default === undefined && f.type !== 'toggle') {
         const val = values[f.key];
@@ -168,19 +176,23 @@ export function PluginSettingsDrawer({ plugin, open, onClose }: PluginSettingsDr
 
         {/* Fields — scrollable */}
         <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
-          {plugin.config_fields.map((f) => (
-            <FieldRow
-              key={f.key}
-              field={f}
-              value={values[f.key]}
-              error={errors[f.key]}
-              showPassword={showPasswords[f.key] ?? false}
-              onTogglePassword={() =>
-                setShowPasswords((prev) => ({ ...prev, [f.key]: !prev[f.key] }))
-              }
-              onChange={(val) => setField(f.key, val)}
-            />
-          ))}
+          {plugin.config_fields.map((f) => {
+            // Hide fields whose show_if condition is not currently satisfied
+            if (!isVisible(f)) return null;
+            return (
+              <FieldRow
+                key={f.key}
+                field={f}
+                value={values[f.key]}
+                error={errors[f.key]}
+                showPassword={showPasswords[f.key] ?? false}
+                onTogglePassword={() =>
+                  setShowPasswords((prev) => ({ ...prev, [f.key]: !prev[f.key] }))
+                }
+                onChange={(val) => setField(f.key, val)}
+              />
+            );
+          })}
 
           {/* Actions (e.g. rebuild index, clear cache) */}
           {plugin.actions && plugin.actions.length > 0 && (
