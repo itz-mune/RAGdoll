@@ -5,7 +5,6 @@ import {
   Trash2, Download, Sun, Moon, Monitor, RefreshCw, X, CheckCircle2, AlertCircle,
   ArrowRight,
 } from 'lucide-react';
-import { AnimatePresence as AP } from 'framer-motion';
 import { useUpdater, fmtBytes, fmtSpeed, fmtEta } from '@/hooks/useUpdater';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
