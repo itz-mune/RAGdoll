@@ -1631,22 +1631,40 @@ def _free_port(port: int) -> None:
 
 
 if __name__ == "__main__":
-    import sys, os
+    import sys, os, traceback as _tb
 
-    # PyInstaller onefile + console=False leaves sys.stdout/stderr as None.
-    # Patch them before anything else so print() and logging don't crash.
     _bundled = hasattr(sys, "_MEIPASS")
-    if sys.stdout is None or sys.stderr is None:
-        _log_dir = Path(sys.executable).parent if _bundled else Path(__file__).parent
+
+    # ── Crash-safe log file ───────────────────────────────────────────────────
+    # Install dir may be read-only (C:\Program Files) so always write to AppData.
+    if sys.platform == "win32":
+        _log_dir = Path(os.environ.get("APPDATA", os.path.expanduser("~"))) / "RAGdoll"
+    else:
+        _log_dir = Path.home() / ".ragdoll"
+    try:
+        _log_dir.mkdir(parents=True, exist_ok=True)
         _log_path = _log_dir / "ragdoll-sidecar.log"
-        try:
-            _log_file = open(_log_path, "a", encoding="utf-8", buffering=1)
-        except OSError:
-            _log_file = open(os.devnull, "w")
-        if sys.stdout is None:
-            sys.stdout = _log_file
-        if sys.stderr is None:
-            sys.stderr = _log_file
+        _log_file = open(_log_path, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        _log_file = open(os.devnull, "w")
+        _log_path = Path(os.devnull)
+
+    # Redirect None streams (PyInstaller console=False) to the log file
+    if sys.stdout is None:
+        sys.stdout = _log_file
+    if sys.stderr is None:
+        sys.stderr = _log_file
+
+    # Global crash hook — catches any unhandled exception and writes it to the
+    # log so we can debug silent crashes in the bundled windowless binary.
+    def _excepthook(exc_type, exc_val, exc_tb):
+        msg = f"\n[CRASH] {exc_type.__name__}: {exc_val}\n"
+        _tb.print_exception(exc_type, exc_val, exc_tb, file=_log_file)
+        _log_file.write(msg)
+        _log_file.flush()
+    sys.excepthook = _excepthook
+
+    print(f"[RAGdoll] Sidecar starting (bundled={_bundled}, log={_log_path})", flush=True)
 
     from config import get_sidecar_host, get_sidecar_port
     port = get_sidecar_port()
