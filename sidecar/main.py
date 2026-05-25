@@ -1631,6 +1631,24 @@ def _free_port(port: int) -> None:
 
 
 if __name__ == "__main__":
+    import sys, os
+
+    # PyInstaller onefile + console=False sets sys.stdout/stderr to None.
+    # Uvicorn's logging formatter calls .isatty() on the stream before we
+    # can intercept it, which raises AttributeError: 'NoneType'.isatty.
+    # Redirect to a log file next to the binary so errors are still inspectable.
+    if sys.stdout is None or sys.stderr is None:
+        _log_dir = Path(sys.executable).parent if hasattr(sys, "_MEIPASS") else Path(__file__).parent
+        _log_path = _log_dir / "ragdoll-sidecar.log"
+        try:
+            _log_file = open(_log_path, "a", encoding="utf-8", buffering=1)
+        except OSError:
+            _log_file = open(os.devnull, "w")
+        if sys.stdout is None:
+            sys.stdout = _log_file
+        if sys.stderr is None:
+            sys.stderr = _log_file
+
     from config import get_sidecar_host, get_sidecar_port
     port = get_sidecar_port()
     host = get_sidecar_host()
