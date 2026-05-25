@@ -115,6 +115,8 @@ Download the latest installer for your platform from the [**Releases**](https://
 | **macOS (Intel)** | `RAGdoll_0.2.0_x86_64.dmg` |
 | **Linux** | `RAGdoll_0.2.0_amd64.AppImage` or `_amd64.deb` |
 
+> **Latest release:** [v0.2.0](https://github.com/itz-mune/RAGdoll/releases/tag/v0.2.0)
+
 > **macOS:** If Gatekeeper blocks the app, right-click → Open on first launch.
 
 > **Windows:** RAGdoll requires [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/). Windows 11 and Windows 10 (post-2021) already include it — the installer will download it automatically on older systems.
