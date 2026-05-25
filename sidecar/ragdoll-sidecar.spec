@@ -69,9 +69,12 @@ a = Analysis(
         # Include the pre-exported ONNX model so the embedded binary can run
         # without needing PyTorch or an internet connection at first launch.
         # The CI workflow exports this model before invoking PyInstaller.
-        [(str(_ONNX_MODEL_DIR), "models/all-MiniLM-L6-v2-onnx")]
+        ([(str(_ONNX_MODEL_DIR), "models/all-MiniLM-L6-v2-onnx")]
         if _ONNX_MODEL_DIR.exists()
-        else []
+        else [])
+        # Bundle ragdoll.config.json at the root of _MEIPASS so config.py
+        # can find it at runtime regardless of where the binary is launched from.
+        + [(str(HERE.parent / "ragdoll.config.json"), ".")]
     ),
     hiddenimports=hidden_imports,
     hookspath=[],
