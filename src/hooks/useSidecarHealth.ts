@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 const SIDECAR_URL = 'http://127.0.0.1:8765';
 
 // How many times to retry while the sidecar is completely unreachable.
-// PyInstaller onefile extracts the bundle to a temp dir on every launch —
-// on slower machines this can take 60-120 s, so we allow up to 5 minutes.
-const MAX_CONNECT_RETRIES = 1200;  // 1200 × 250 ms = 5 min max wait for sidecar to spawn
-const CONNECT_DELAY_MS = 250;  // check every 250 ms — snappy feedback
+// On first launch uv has to download Python 3.12 + all packages — this can
+// take 10–30 minutes on a slow connection.  Subsequent launches are instant
+// (venv already synced).  We wait up to 30 minutes before giving up.
+const MAX_CONNECT_RETRIES = 7200;  // 7200 × 250 ms = 30 min max wait on first launch
+const CONNECT_DELAY_MS = 250;  // check every 250 ms — snappy feedback once up
 
 // Once the sidecar responds, keep polling stage updates while the model warms.
 const WARMUP_POLL_MS = 500;     // poll twice per second while warming up

@@ -21,16 +21,23 @@ type AppView = 'shell' | 'settings';
 // ── Screens ──────────────────────────────────────────────────────────────────
 
 function SplashScreen({ attempt, stageLabel }: { attempt: number; stageLabel: string }) {
-  const isSlowStart = attempt > 60; // > 15 s — probably first-launch extraction
+  const isSlowStart = attempt > 20;  // > 5 s — show hint early
+  const isVerySlowStart = attempt > 240; // > 1 min — probably downloading packages
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
       <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary" />
       <p className="text-sm text-muted-foreground">
-        {stageLabel !== 'Starting…' ? stageLabel : attempt > 0 ? `Connecting (${attempt})…` : 'Starting…'}
+        {stageLabel !== 'Starting…' ? stageLabel : attempt > 0 ? `Connecting… (${attempt})` : 'Starting…'}
       </p>
-      {isSlowStart && (
+      {isSlowStart && !isVerySlowStart && (
         <p className="max-w-xs text-center text-xs text-muted-foreground/60">
-          First launch takes a moment — unpacking the AI engine…
+          Setting up the Python environment — this takes a moment on first launch.
+        </p>
+      )}
+      {isVerySlowStart && (
+        <p className="max-w-sm text-center text-xs text-muted-foreground/60">
+          Downloading Python and packages (~500 MB). This only happens once.
+          Keep the app open and stay connected to the internet.
         </p>
       )}
     </div>
@@ -39,13 +46,20 @@ function SplashScreen({ attempt, stageLabel }: { attempt: number; stageLabel: st
 
 function ErrorScreen() {
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center gap-3 bg-background text-foreground">
+    <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
       <p className="font-medium text-destructive">Sidecar failed to start</p>
-      <p className="max-w-xs text-center text-sm text-muted-foreground">
-        Make sure <code className="rounded bg-muted px-1 py-0.5 text-xs">uv</code> is installed and
-        the Python environment is set up in{' '}
-        <code className="rounded bg-muted px-1 py-0.5 text-xs">sidecar/</code>.
+      <p className="max-w-sm text-center text-sm text-muted-foreground">
+        The Python backend didn't respond after 30 minutes.
+        On <span className="text-foreground font-medium">first launch</span> this is normal —
+        RAGdoll needs to download Python and its dependencies (~500 MB).
+        Make sure you have an internet connection, then restart the app.
       </p>
+      <button
+        className="mt-1 rounded-md bg-muted px-4 py-1.5 text-sm hover:bg-muted/80"
+        onClick={() => window.location.reload()}
+      >
+        Retry
+      </button>
     </div>
   );
 }
