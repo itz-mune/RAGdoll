@@ -80,35 +80,26 @@ jobs:
 
       # Bundle the full sidecar Python source tree into src-tauri/sidecar-src/
       # so Tauri can include it as a resource (see tauri.conf.json → resources).
-      # Excludes build artefacts, dev-only files, and byte-compiled caches.
-      # The pre-exported ONNX model (sidecar/models/) is included.
+      # Excludes .venv (large), dist, build, byte-compiled caches, and spec files.
+      # The pre-exported ONNX model (sidecar/models/) IS included.
       - name: Prepare sidecar-src bundle
         shell: bash
         run: |
-          python - <<'EOF'
-          import shutil, os
+          DST="src-tauri/sidecar-src"
+          rm -rf "$DST"
+          cp -r sidecar "$DST"
 
-          EXCLUDE_DIRS = {'.venv', 'dist', 'build', '__pycache__', '.git'}
-          EXCLUDE_EXTS = {'.pyc', '.pyo', '.spec'}
+          # Strip build artefacts and dev-only directories
+          rm -rf "$DST/.venv" "$DST/dist" "$DST/build"
 
-          src = 'sidecar'
-          dst = 'src-tauri/sidecar-src'
+          # Remove byte-compiled files and PyInstaller spec
+          find "$DST" -name '*.pyc' -delete 2>/dev/null || true
+          find "$DST" -name '*.pyo' -delete 2>/dev/null || true
+          find "$DST" -name '*.spec' -delete 2>/dev/null || true
+          find "$DST" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 
-          def ignore_fn(directory, contents):
-              ignored = set()
-              for name in contents:
-                  if name in EXCLUDE_DIRS:
-                      ignored.add(name)
-                  elif any(name.endswith(ext) for ext in EXCLUDE_EXTS):
-                      ignored.add(name)
-              return ignored
-
-          if os.path.exists(dst):
-              shutil.rmtree(dst)
-          shutil.copytree(src, dst, ignore=ignore_fn)
-          items = sorted(os.listdir(dst))
-          print(f'sidecar-src ready ({len(items)} items):', items)
-          EOF
+          echo "sidecar-src ready — $(find "$DST" -type f | wc -l | tr -d ' ') files"
+          ls -la "$DST"
 
       # Place the CI uv binary into src-tauri/binaries/ using Tauri's
       # externalBin naming convention: uv-{triple}(.exe).
