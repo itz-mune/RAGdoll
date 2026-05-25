@@ -43,10 +43,11 @@
     ],
     "resources": [
       "../ragdoll.config.json",
-      "../public/dictionaries/*"
+      "../public/dictionaries/*",
+      "sidecar-src/**"
     ],
     "externalBin": [
-      "binaries/ragdoll-sidecar"
+      "binaries/uv"
     ],
     "windows": {
       "webviewInstallMode": {

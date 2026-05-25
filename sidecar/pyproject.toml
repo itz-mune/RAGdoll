@@ -15,11 +15,8 @@ dependencies = [
     "langchain-ollama>=1.1.0",
     "langchain-openai>=1.2.1",
     "langgraph>=1.2.0",
-    "pyinstaller>=6.20.0",
     "python-dotenv>=1.2.2",
-    "sentence-transformers>=5.5.0",
     "onnxruntime>=1.19.0",
-    "optimum[onnxruntime]>=1.21.0",
     "sqlmodel>=0.0.38",
     "uvicorn>=0.46.0",
     "pypdf>=6.11.0",
@@ -47,4 +44,13 @@ dependencies = [
     "send2trash>=1.8.3",
     "psutil>=6.0.0",
     "chardet>=5.2.0",
+]
+
+# Dev-only: needed to export the ONNX model at CI build time, not at runtime.
+# Moving these here keeps torch (~2 GB) out of the user's first-launch install.
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.20.0",
+    "sentence-transformers>=5.5.0",
+    "optimum[onnxruntime]>=1.21.0",
 ]

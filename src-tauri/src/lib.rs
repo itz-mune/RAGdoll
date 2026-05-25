@@ -31,26 +31,135 @@ fn spawn_sidecar() -> Option<Child> {
         .ok()
 }
 
-/// Release build: launch the bundled PyInstaller binary placed beside the exe.
+/// Release build: sync a venv via the bundled uv binary then run main.py.
+/// Runs entirely in a background thread so the Tauri window opens immediately.
+/// The frontend health-check polls /health until the sidecar is ready.
 #[cfg(not(debug_assertions))]
-fn spawn_sidecar() -> Option<Child> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let binary = if cfg!(target_os = "windows") {
-        dir.join("ragdoll-sidecar.exe")
+fn spawn_sidecar_bg(app_handle: AppHandle) {
+    std::thread::spawn(move || {
+        match do_spawn_sidecar(&app_handle) {
+            Some(child) => {
+                let state = app_handle.state::<SidecarHandle>();
+                *state.0.lock().unwrap() = Some(child);
+                eprintln!("[RAGdoll] Sidecar process started");
+            }
+            None => eprintln!("[RAGdoll] Sidecar failed to start"),
+        }
+    });
+}
+
+#[cfg(not(debug_assertions))]
+fn do_spawn_sidecar(app_handle: &AppHandle) -> Option<Child> {
+    // ── Paths ─────────────────────────────────────────────────────────────────
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+
+    // uv binary placed next to the main exe by Tauri's externalBin bundler
+    let uv = exe_dir.join(if cfg!(target_os = "windows") {
+        "uv.exe"
     } else {
-        dir.join("ragdoll-sidecar")
+        "uv"
+    });
+
+    // Sidecar Python source — bundled as Tauri resources.
+    // resource_dir() handles platform differences (macOS app bundle etc.)
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .inspect_err(|e| eprintln!("[RAGdoll] resource_dir error: {e}"))
+        .ok()?;
+    let sidecar_src = resource_dir.join("sidecar-src");
+
+    // ── Writable data directory ───────────────────────────────────────────────
+    // Holds the venv, downloaded Python, plugins, LanceDB data.
+    #[cfg(target_os = "windows")]
+    let app_data = std::path::PathBuf::from(
+        std::env::var("LOCALAPPDATA").unwrap_or_default(),
+    )
+    .join("RAGdoll");
+
+    #[cfg(not(target_os = "windows"))]
+    let app_data = std::path::PathBuf::from(
+        std::env::var("HOME").unwrap_or_default(),
+    )
+    .join(".ragdoll");
+
+    if let Err(e) = std::fs::create_dir_all(&app_data) {
+        eprintln!("[RAGdoll] mkdir app_data failed: {e}");
+    }
+
+    // ── First-launch: seed preinstalled plugins ───────────────────────────────
+    let bundled_plugins = sidecar_src.join("ragdoll_plugins");
+    let data_plugins    = app_data.join("ragdoll_plugins");
+    if !data_plugins.exists() && bundled_plugins.exists() {
+        if let Err(e) = copy_dir_all(&bundled_plugins, &data_plugins) {
+            eprintln!("[RAGdoll] Plugin seed failed: {e}");
+        } else {
+            eprintln!("[RAGdoll] Preinstalled plugins seeded to data dir");
+        }
+    }
+
+    // ── Sync venv ─────────────────────────────────────────────────────────────
+    // Fast on subsequent launches (lockfile unchanged → nothing to do).
+    // Slow only on first launch: downloads Python + all runtime dependencies.
+    let venv_dir   = app_data.join("venv");
+    let python_dir = app_data.join("python");
+
+    eprintln!("[RAGdoll] Running uv sync (first launch may take a few minutes)…");
+    let sync_ok = Command::new(&uv)
+        .args([
+            "sync",
+            "--frozen",
+            "--project",
+            sidecar_src.to_str()?,
+            "--python-preference",
+            "managed",
+            "--python",
+            "3.12",
+        ])
+        .env("UV_PROJECT_ENVIRONMENT",  venv_dir.to_str()?)
+        .env("UV_PYTHON_INSTALL_DIR",   python_dir.to_str()?)
+        .env("UV_NO_PROGRESS",          "1")
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if !sync_ok {
+        eprintln!("[RAGdoll] uv sync failed");
+        return None;
+    }
+
+    // ── Launch sidecar ────────────────────────────────────────────────────────
+    let python = if cfg!(target_os = "windows") {
+        venv_dir.join("Scripts").join("python.exe")
+    } else {
+        venv_dir.join("bin").join("python")
     };
 
-    Command::new(&binary)
+    eprintln!("[RAGdoll] Launching sidecar from {:?}", sidecar_src);
+    Command::new(&python)
+        .arg(sidecar_src.join("main.py"))
+        .current_dir(&sidecar_src)
+        .env("RAGDOLL_DATA_DIR", app_data.to_str()?)
         .spawn()
-        .inspect_err(|e| {
-            eprintln!(
-                "[RAGdoll] Failed to spawn bundled sidecar at {}: {e}",
-                binary.display()
-            )
-        })
+        .inspect_err(|e| eprintln!("[RAGdoll] spawn failed: {e}"))
         .ok()
+}
+
+/// Recursively copy a directory tree.
+#[cfg(not(debug_assertions))]
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ft    = entry.file_type()?;
+        let dest  = dst.join(entry.file_name());
+        if ft.is_dir() {
+            copy_dir_all(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), &dest)?;
+        }
+    }
+    Ok(())
 }
 
 // ── Tauri commands ────────────────────────────────────────────────────────────
@@ -62,7 +171,6 @@ fn set_close_to_tray(state: State<CloseToTrayState>, value: bool) {
 }
 
 /// Update the profile label shown in the tray menu.
-/// Called from profileStore.setActiveProfile() on the frontend.
 #[tauri::command]
 fn update_tray_profile(
     app: AppHandle,
@@ -113,17 +221,21 @@ pub fn run() {
             "None configured".to_string(),
         )))
         .setup(|app| {
-            // Spawn Python sidecar
-            let state = app.state::<SidecarHandle>();
-            *state.0.lock().unwrap() = spawn_sidecar();
+            // Dev: spawn synchronously (uv run is fast)
+            #[cfg(debug_assertions)]
+            {
+                let state = app.state::<SidecarHandle>();
+                *state.0.lock().unwrap() = spawn_sidecar();
+            }
+            // Release: background thread — window opens immediately while
+            // uv sync runs. Frontend spinner waits up to 10 min for /health.
+            #[cfg(not(debug_assertions))]
+            spawn_sidecar_bg(app.handle().clone());
 
-            // Create system tray icon + menu
             tray::setup_tray(app)?;
-
             Ok(())
         })
         .on_window_event(|window, event| match event {
-            // X button — hide to tray instead of quitting (when enabled)
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let close_to_tray = *window
                     .state::<CloseToTrayState>()
@@ -135,7 +247,6 @@ pub fn run() {
                     api.prevent_close();
                     window.hide().ok();
                 } else {
-                    // Kill sidecar before the process exits
                     let child = window
                         .state::<SidecarHandle>()
                         .0
@@ -144,11 +255,9 @@ pub fn run() {
                         .take();
                     if let Some(mut child) = child {
                         child.kill().ok();
-                        eprintln!("[RAGdoll] Sidecar process killed");
                     }
                 }
             }
-            // Window destroyed (e.g. quit via tray menu std::process::exit)
             tauri::WindowEvent::Destroyed => {
                 let child = window
                     .state::<SidecarHandle>()
@@ -158,7 +267,6 @@ pub fn run() {
                     .take();
                 if let Some(mut child) = child {
                     child.kill().ok();
-                    eprintln!("[RAGdoll] Sidecar process killed");
                 }
             }
             _ => {}

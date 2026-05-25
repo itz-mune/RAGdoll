@@ -27,13 +27,13 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            sidecar-ext: '.exe'
+            uv-ext: '.exe'
           - os: macos-14         # Apple Silicon
             target: aarch64-apple-darwin
-            sidecar-ext: ''
+            uv-ext: ''
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            sidecar-ext: ''
+            uv-ext: ''
             # Skip RPM — xz-compressing a large binary takes hours on CI.
             # AppImage + deb cover the vast majority of Linux users.
             extra-args: '--bundles deb,appimage'
@@ -43,39 +43,84 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Python / uv / sidecar ─────────────────────────────────────────────────
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
+      # ── uv ───────────────────────────────────────────────────────────────────
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
-      - name: Install sidecar dependencies
+      # Ensure uv.lock is current after the pyproject.toml dep-group changes.
+      # A no-op if the lockfile is already up to date.
+      - name: Update uv lockfile
         working-directory: sidecar
-        run: uv sync --frozen
+        run: uv lock
 
-      # Export the ONNX model BEFORE PyInstaller so it gets bundled into the
-      # binary as a datas entry. This avoids bundling the full PyTorch runtime
-      # (~2-3 GB) which would push the onefile archive over PyInstaller's 4 GB
-      # CArchive limit. The model (~25 MB quantized) is tiny by comparison.
-      - name: Pre-export ONNX embedding model
+      # Install dev-only deps (sentence-transformers, optimum[onnxruntime]) so
+      # we can pre-export the ONNX model at CI time.
+      # These are in [dependency-groups.dev] — end users NEVER install torch.
+      - name: Export ONNX embedding model
         working-directory: sidecar
-        run: uv run python export_onnx_model.py
+        run: |
+          uv sync --group dev
+          uv run python export_onnx_model.py
 
-      - name: Build sidecar with PyInstaller
-        working-directory: sidecar
-        run: uv run pyinstaller ragdoll-sidecar.spec --noconfirm
+      # Seed preinstalled plugins from the public plugins registry.
+      # lib.rs copies sidecar-src/ragdoll_plugins/ → AppData on first launch.
+      - name: Fetch preinstalled plugins
+        shell: bash
+        run: |
+          git clone --depth 1 https://github.com/itz-mune/RAGdoll-plugins.git _plugins_tmp
+          mkdir -p sidecar/ragdoll_plugins
+          SRC="_plugins_tmp/plugins"
+          if [ -d "$SRC" ]; then
+            cp -r "$SRC/." sidecar/ragdoll_plugins/
+            echo "Seeded $(ls sidecar/ragdoll_plugins | wc -l | tr -d ' ') plugin(s)"
+          else
+            echo "No plugins/ dir in plugins repo — skipping seed"
+          fi
+          rm -rf _plugins_tmp
 
-      - name: Place sidecar binary for Tauri
+      # Bundle the full sidecar Python source tree into src-tauri/sidecar-src/
+      # so Tauri can include it as a resource (see tauri.conf.json → resources).
+      # Excludes build artefacts, dev-only files, and byte-compiled caches.
+      # The pre-exported ONNX model (sidecar/models/) is included.
+      - name: Prepare sidecar-src bundle
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import shutil, os
+
+          EXCLUDE_DIRS = {'.venv', 'dist', 'build', '__pycache__', '.git'}
+          EXCLUDE_EXTS = {'.pyc', '.pyo', '.spec'}
+
+          src = 'sidecar'
+          dst = 'src-tauri/sidecar-src'
+
+          def ignore_fn(directory, contents):
+              ignored = set()
+              for name in contents:
+                  if name in EXCLUDE_DIRS:
+                      ignored.add(name)
+                  elif any(name.endswith(ext) for ext in EXCLUDE_EXTS):
+                      ignored.add(name)
+              return ignored
+
+          if os.path.exists(dst):
+              shutil.rmtree(dst)
+          shutil.copytree(src, dst, ignore=ignore_fn)
+          items = sorted(os.listdir(dst))
+          print(f'sidecar-src ready ({len(items)} items):', items)
+          EOF
+
+      # Place the CI uv binary into src-tauri/binaries/ using Tauri's
+      # externalBin naming convention: uv-{triple}(.exe).
+      # At install time Tauri strips the triple suffix → uv / uv.exe beside the exe.
+      - name: Place uv binary for Tauri
         shell: bash
         run: |
           mkdir -p src-tauri/binaries
-          SRC="sidecar/dist/ragdoll-sidecar${{ matrix.sidecar-ext }}"
-          DST="src-tauri/binaries/ragdoll-sidecar-${{ matrix.target }}${{ matrix.sidecar-ext }}"
-          cp "$SRC" "$DST"
-          echo "Placed sidecar → $DST"
+          UV_PATH="$(which uv)"
+          DST="src-tauri/binaries/uv-${{ matrix.target }}${{ matrix.uv-ext }}"
+          cp "$UV_PATH" "$DST"
+          echo "Placed uv → $DST"
 
       # ── Node / pnpm ──────────────────────────────────────────────────────────
       - name: Set up Node.js 24
@@ -119,7 +164,8 @@ jobs:
             libcairo2-dev \
             libgdk-pixbuf2.0-dev \
             libffi-dev \
-            shared-mime-info
+            shared-mime-info \
+            libgtk-3-dev
 
       # ── Build & publish ───────────────────────────────────────────────────────
       - name: Build and publish Tauri app
