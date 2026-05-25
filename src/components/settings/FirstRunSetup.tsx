@@ -91,7 +91,7 @@ export function FirstRunSetup({ onComplete }: FirstRunSetupProps) {
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-bold text-foreground">Terms & Conditions</h2>
               <a
-                href="https://github.com/ragdoll-app/ragdoll"
+                href="https://github.com/itz-mune/RAGdoll"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 text-primary hover:text-primary/80 transition-colors"
