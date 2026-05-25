@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ArrowRight, Check, ExternalLink } from 'lucide-react';
 import LineWaves from './LineWaves';
 import { ProfileForm } from './ProfileForm';
@@ -22,6 +22,15 @@ export function FirstRunSetup({ onComplete }: FirstRunSetupProps) {
     setStep('complete');
     setTimeout(() => onComplete?.(), 600);
   };
+
+  // Escape closes the preview (only when a profile already exists)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && step === 'welcome') onComplete?.();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [step, onComplete]);
 
   return (
     <div className="relative flex h-screen w-screen flex-col items-center justify-center bg-background px-4 overflow-hidden">

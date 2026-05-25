@@ -151,6 +151,12 @@ export default function App() {
         profileStore.getState().closeSwitcher();
         if (view === 'settings') setView('shell');
       }
+
+      // ── Preview first-run screen (Ctrl/⌘ + Shift + F1) ──────────────────
+      if (mod && e.shiftKey && e.key === 'F1') {
+        e.preventDefault();
+        setSetupComplete(false);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
