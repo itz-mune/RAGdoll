@@ -44,7 +44,7 @@
     "resources": [
       "../ragdoll.config.json",
       "../public/dictionaries/*",
-      "sidecar-src/**"
+      "sidecar-src/**/*"
     ],
     "externalBin": [
       "binaries/uv"

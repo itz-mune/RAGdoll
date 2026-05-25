@@ -125,6 +125,19 @@ jobs:
             shared-mime-info \
             libgtk-3-dev
 
+      # ── Pre-build sanity check ───────────────────────────────────────────────
+      - name: Verify sidecar-src exists and is populated
+        shell: bash
+        run: |
+          echo "=== git commit ==="
+          git rev-parse HEAD
+          echo "=== src-tauri/sidecar-src top-level ==="
+          ls -la src-tauri/sidecar-src/ || echo "MISSING: src-tauri/sidecar-src/"
+          echo "=== file count ==="
+          find src-tauri/sidecar-src -type f | wc -l
+          echo "=== uv binary ==="
+          ls -la src-tauri/binaries/ || echo "MISSING: src-tauri/binaries/"
+
       # ── Build & publish ───────────────────────────────────────────────────────
       - name: Build and publish Tauri app
         uses: tauri-apps/tauri-action@v0
