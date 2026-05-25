@@ -116,7 +116,13 @@ jobs:
             librsvg2-dev \
             patchelf \
             libssl-dev \
-            rpm
+            rpm \
+            libglib2.0-dev \
+            libpango1.0-dev \
+            libcairo2-dev \
+            libgdk-pixbuf2.0-dev \
+            libffi-dev \
+            shared-mime-info
 
       # ── Build & publish ───────────────────────────────────────────────────────
       - name: Build and publish Tauri app
@@ -129,7 +135,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'RAGdoll ${{ github.ref_name }}'
           releaseBody: |
-            See [CHANGELOG.md](https://github.com/itz-mune/RAGdoll/blob/main/CHANGELOG.md) for full release notes.
+            See the [**What's New**](https://github.com/itz-mune/RAGdoll#-whats-new--v020) section in the README for full release notes.
 
             > **First-time install?** Download the installer for your OS below.
             > **Existing install?** RAGdoll will prompt you to update automatically.
