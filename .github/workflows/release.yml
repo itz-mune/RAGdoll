@@ -43,76 +43,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── uv ───────────────────────────────────────────────────────────────────
+      # ── uv binary ────────────────────────────────────────────────────────────
+      # The sidecar Python source (src-tauri/sidecar-src/) and the pre-exported
+      # ONNX model are committed directly to the repo — no copy or export step
+      # needed.  All CI has to do is place the uv binary that lib.rs will call
+      # at first launch to sync the venv.
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
-      # Ensure uv.lock is current after the pyproject.toml dep-group changes.
-      # A no-op if the lockfile is already up to date.
-      - name: Update uv lockfile
-        working-directory: sidecar
-        run: uv lock
-
-      # Install dev-only deps (sentence-transformers, optimum[onnxruntime]) so
-      # we can pre-export the ONNX model at CI time.
-      # These are in [dependency-groups.dev] — end users NEVER install torch.
-      - name: Export ONNX embedding model
-        working-directory: sidecar
-        run: |
-          uv sync --group dev
-          uv run python export_onnx_model.py
-
-      # Seed preinstalled plugins from the public plugins registry.
-      # lib.rs copies sidecar-src/ragdoll_plugins/ → AppData on first launch.
+      # Seed preinstalled plugins from the public plugins registry into
+      # src-tauri/sidecar-src/ragdoll_plugins/ so lib.rs can copy them to
+      # AppData on the user's first launch.
       - name: Fetch preinstalled plugins
         shell: bash
         run: |
           git clone --depth 1 https://github.com/itz-mune/RAGdoll-plugins.git _plugins_tmp
-          mkdir -p sidecar/ragdoll_plugins
+          mkdir -p src-tauri/sidecar-src/ragdoll_plugins
           SRC="_plugins_tmp/plugins"
           if [ -d "$SRC" ]; then
-            cp -r "$SRC/." sidecar/ragdoll_plugins/
-            echo "Seeded $(ls sidecar/ragdoll_plugins | wc -l | tr -d ' ') plugin(s)"
+            cp -r "$SRC/." src-tauri/sidecar-src/ragdoll_plugins/
+            echo "Seeded $(ls src-tauri/sidecar-src/ragdoll_plugins | wc -l | tr -d ' ') plugin(s)"
           else
-            echo "No plugins/ dir in plugins repo — skipping seed"
+            echo "No plugins/ dir found — skipping seed"
           fi
           rm -rf _plugins_tmp
 
-      # Bundle the sidecar Python source tree into src-tauri/sidecar-src/.
-      # We enumerate top-level items and skip .venv / dist / build entirely
-      # rather than copy-then-delete: on Windows the MAX_PATH limit (260 chars)
-      # causes `cp -r sidecar …` to fail mid-way when it hits deeply nested
-      # site-packages paths inside .venv, leaving the destination empty.
-      - name: Prepare sidecar-src bundle
-        shell: bash
-        run: |
-          DST="src-tauri/sidecar-src"
-          mkdir -p "$DST"
-
-          # Copy every top-level item except .venv, dist, build, .git
-          for item in sidecar/* sidecar/.[!.]*; do
-            [ -e "$item" ] || continue
-            base="$(basename "$item")"
-            case "$base" in
-              .venv|dist|build|.git) continue ;;
-            esac
-            cp -r "$item" "$DST/"
-          done
-
-          # Strip byte-compiled caches and PyInstaller spec files
-          find "$DST" -name '*.pyc'  -delete 2>/dev/null || true
-          find "$DST" -name '*.pyo'  -delete 2>/dev/null || true
-          find "$DST" -name '*.spec' -delete 2>/dev/null || true
-
-          FILE_COUNT="$(find "$DST" -type f | wc -l | tr -d ' ')"
-          echo "sidecar-src ready — $FILE_COUNT files"
-          ls -la "$DST"
-          # Fail loudly if nothing was copied (catches silent cp errors)
-          [ "$FILE_COUNT" -gt 0 ] || { echo "ERROR: sidecar-src is empty!"; exit 1; }
-
       # Place the CI uv binary into src-tauri/binaries/ using Tauri's
       # externalBin naming convention: uv-{triple}(.exe).
-      # At install time Tauri strips the triple suffix → uv / uv.exe beside the exe.
+      # At install time Tauri strips the triple → uv / uv.exe beside the exe.
       - name: Place uv binary for Tauri
         shell: bash
         run: |

@@ -17,15 +17,24 @@ pub struct ActiveProfileState(pub Mutex<String>);
 
 // ── Sidecar spawn ─────────────────────────────────────────────────────────────
 
-/// Dev build: run directly via `uv run python main.py` from the workspace.
+/// Dev build: run directly via `uv run python main.py` from sidecar-src.
 #[cfg(debug_assertions)]
 fn spawn_sidecar() -> Option<Child> {
+    // sidecar source now lives inside src-tauri/sidecar-src/ (same repo)
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let sidecar_dir = manifest_dir.parent()?.join("sidecar");
+    let sidecar_dir = manifest_dir.join("sidecar-src");
+
+    // ragdoll.config.json is two levels up (repo root). Pass the absolute path
+    // so config.py can find it regardless of working directory.
+    let config_path = manifest_dir
+        .parent()
+        .map(|r| r.join("ragdoll.config.json"))
+        .unwrap_or_default();
 
     Command::new("uv")
         .args(["run", "python", "main.py"])
         .current_dir(&sidecar_dir)
+        .env("RAGDOLL_CONFIG_PATH", &config_path)
         .spawn()
         .inspect_err(|e| eprintln!("[RAGdoll] Failed to spawn sidecar: {e}"))
         .ok()

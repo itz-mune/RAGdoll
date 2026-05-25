@@ -1,9 +1,12 @@
 # Python / uv
-sidecar/.venv/
-sidecar/__pycache__/
+src-tauri/sidecar-src/.venv/
+src-tauri/sidecar-src/__pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+
+# Large base ONNX model — only the quantized version (22 MB) is committed
+src-tauri/sidecar-src/models/all-MiniLM-L6-v2-onnx/model.onnx
 
 # Node
 node_modules/
@@ -16,8 +19,8 @@ src-tauri/target/
 .env.local
 
 # LanceDB vector data
-sidecar/memory/data/
-sidecar/*.db
+src-tauri/sidecar-src/memory/data/
+src-tauri/sidecar-src/*.db
 
 # OS
 .DS_Store
@@ -38,7 +41,7 @@ plugins-repo/
 # Runtime directories created by the sidecar at startup
 ragdoll_plugins/
 ragdoll_memory/
-sidecar/ragdoll_memory/
+src-tauri/sidecar-src/ragdoll_memory/
 
 # Local notes
 INSTALLATION_COMMANDS.md
