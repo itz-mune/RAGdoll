@@ -21,12 +21,18 @@ type AppView = 'shell' | 'settings';
 // ── Screens ──────────────────────────────────────────────────────────────────
 
 function SplashScreen({ attempt, stageLabel }: { attempt: number; stageLabel: string }) {
+  const isSlowStart = attempt > 60; // > 15 s — probably first-launch extraction
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background text-foreground">
       <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary" />
       <p className="text-sm text-muted-foreground">
-        {stageLabel !== 'Starting…' ? stageLabel : attempt > 0 ? `Connecting (${attempt})…` : 'Starting sidecar…'}
+        {stageLabel !== 'Starting…' ? stageLabel : attempt > 0 ? `Connecting (${attempt})…` : 'Starting…'}
       </p>
+      {isSlowStart && (
+        <p className="max-w-xs text-center text-xs text-muted-foreground/60">
+          First launch takes a moment — unpacking the AI engine…
+        </p>
+      )}
     </div>
   );
 }

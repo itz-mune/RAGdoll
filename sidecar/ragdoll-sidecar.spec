@@ -133,8 +133,14 @@ exe = EXE(
     strip=False,
     upx=True,
     upx_exclude=[],
-    runtime_tmpdir=None,
-    # One-file bundle — no need to extract a directory tree on the target machine
+    # Use a fixed extraction path so the bootloader reuses cached files on every
+    # launch after the first.  Without this PyInstaller re-extracts the entire
+    # bundle to a NEW random temp dir each run, which can take 30-90 s for a
+    # bundle this size — long enough to trip the frontend health-check timeout.
+    # The path is relative to the running binary; the bootloader resolves it at
+    # runtime so it always lands next to the installed ragdoll-sidecar.exe.
+    runtime_tmpdir=".",
+    # One-file bundle — no need to ship a directory tree on the target machine
     onefile=True,
     console=False,   # No console window on Windows
     disable_windowed_traceback=False,

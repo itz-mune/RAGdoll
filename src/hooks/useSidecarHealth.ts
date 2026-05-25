@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 
 const SIDECAR_URL = 'http://127.0.0.1:8765';
 
-// How many times to retry while the sidecar is completely unreachable
-const MAX_CONNECT_RETRIES = 120;  // 120 × 250 ms = 30 s max wait for sidecar to spawn
+// How many times to retry while the sidecar is completely unreachable.
+// PyInstaller onefile extracts a large bundle on first use — on slower machines
+// this can take 60-90 s before the port even opens, so we allow up to 3 minutes.
+const MAX_CONNECT_RETRIES = 720;  // 720 × 250 ms = 3 min max wait for sidecar to spawn
 const CONNECT_DELAY_MS = 250;  // check every 250 ms — snappy feedback
 
 // Once the sidecar responds, keep polling stage updates while the model warms.
