@@ -1633,12 +1633,11 @@ def _free_port(port: int) -> None:
 if __name__ == "__main__":
     import sys, os
 
-    # PyInstaller onefile + console=False sets sys.stdout/stderr to None.
-    # Uvicorn's logging formatter calls .isatty() on the stream before we
-    # can intercept it, which raises AttributeError: 'NoneType'.isatty.
-    # Redirect to a log file next to the binary so errors are still inspectable.
+    # PyInstaller onefile + console=False leaves sys.stdout/stderr as None.
+    # Patch them before anything else so print() and logging don't crash.
+    _bundled = hasattr(sys, "_MEIPASS")
     if sys.stdout is None or sys.stderr is None:
-        _log_dir = Path(sys.executable).parent if hasattr(sys, "_MEIPASS") else Path(__file__).parent
+        _log_dir = Path(sys.executable).parent if _bundled else Path(__file__).parent
         _log_path = _log_dir / "ragdoll-sidecar.log"
         try:
             _log_file = open(_log_path, "a", encoding="utf-8", buffering=1)
@@ -1655,6 +1654,16 @@ if __name__ == "__main__":
     _free_port(port)
 
     run_kwargs: dict = {"host": host, "port": port, "log_level": "info"}
+
+    # When bundled as a windowless PyInstaller binary, uvicorn's DefaultFormatter
+    # calls sys.stderr.isatty() during logging setup and crashes even after we
+    # patch sys.stderr — because the formatter is instantiated inside dictConfig
+    # before our patch takes full effect in some uvicorn versions.
+    # Passing log_config=None tells uvicorn to skip its logging setup entirely,
+    # which avoids the crash. We lose uvicorn's pretty request logs in production
+    # but the sidecar still logs to ragdoll-sidecar.log via the patch above.
+    if _bundled:
+        run_kwargs["log_config"] = None
 
     # httptools is faster than the default h11 HTTP parser
     try:
