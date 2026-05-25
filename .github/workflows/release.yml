@@ -28,9 +28,6 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             sidecar-ext: '.exe'
-          - os: macos-13         # Intel
-            target: x86_64-apple-darwin
-            sidecar-ext: ''
           - os: macos-14         # Apple Silicon
             target: aarch64-apple-darwin
             sidecar-ext: ''
