@@ -19,7 +19,7 @@ from typing import Optional, List
 
 import httpx
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, UploadFile, File
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
@@ -129,7 +129,10 @@ app = FastAPI(title="RAGdoll Sidecar", version="0.1.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:1420", "tauri://localhost", "https://tauri.localhost"],
+    # allow_origin_regex=".*" reflects the actual Origin header back, so it works
+    # regardless of which protocol/host Tauri's WebView2 uses (https://tauri.localhost,
+    # tauri://localhost, null, etc.).  Safe because this server only binds to 127.0.0.1.
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -180,7 +183,9 @@ class FileProcessRequest(BaseModel):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.get("/health")
-async def health() -> dict:
+async def health(request: Request) -> dict:
+    origin = request.headers.get("origin", "<no-origin>")
+    print(f"[health] origin={origin!r}", flush=True)
     return {"status": "ok", "version": "0.1.0", "stage": _sidecar_stage}
 
 
