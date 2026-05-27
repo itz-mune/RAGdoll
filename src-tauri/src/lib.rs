@@ -4,6 +4,14 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
+// On Windows, set CREATE_NO_WINDOW so uv/python child processes don't pop up
+// a console window.  The flag is a no-op on other platforms (the cfg guard
+// keeps it from even compiling there).
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 // ── Managed state ─────────────────────────────────────────────────────────────
 
 struct SidecarHandle(Mutex<Option<Child>>);
@@ -114,7 +122,8 @@ fn do_spawn_sidecar(app_handle: &AppHandle) -> Option<Child> {
     let python_dir = app_data.join("python");
 
     eprintln!("[RAGdoll] Running uv sync (first launch may take a few minutes)…");
-    let sync_ok = Command::new(&uv)
+    let mut sync_cmd = Command::new(&uv);
+    sync_cmd
         .args([
             "sync",
             "--frozen",
@@ -127,7 +136,10 @@ fn do_spawn_sidecar(app_handle: &AppHandle) -> Option<Child> {
         ])
         .env("UV_PROJECT_ENVIRONMENT",  venv_dir.to_str()?)
         .env("UV_PYTHON_INSTALL_DIR",   python_dir.to_str()?)
-        .env("UV_NO_PROGRESS",          "1")
+        .env("UV_NO_PROGRESS",          "1");
+    #[cfg(target_os = "windows")]
+    sync_cmd.creation_flags(CREATE_NO_WINDOW);
+    let sync_ok = sync_cmd
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -145,10 +157,14 @@ fn do_spawn_sidecar(app_handle: &AppHandle) -> Option<Child> {
     };
 
     eprintln!("[RAGdoll] Launching sidecar from {:?}", sidecar_src);
-    Command::new(&python)
+    let mut py_cmd = Command::new(&python);
+    py_cmd
         .arg(sidecar_src.join("main.py"))
         .current_dir(&sidecar_src)
-        .env("RAGDOLL_DATA_DIR", app_data.to_str()?)
+        .env("RAGDOLL_DATA_DIR", app_data.to_str()?);
+    #[cfg(target_os = "windows")]
+    py_cmd.creation_flags(CREATE_NO_WINDOW);
+    py_cmd
         .spawn()
         .inspect_err(|e| eprintln!("[RAGdoll] spawn failed: {e}"))
         .ok()
