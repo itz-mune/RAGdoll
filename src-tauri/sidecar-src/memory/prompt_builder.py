@@ -13,7 +13,14 @@ _BASE_SYSTEM = (
     "Answer using the provided context when relevant. "
     "If the context is not relevant to the question, ignore it and answer from "
     "your general knowledge. "
-    "Today is {date}."
+    "Today is {date}.\n\n"
+    "FORMATTING RULES:\n"
+    "- Whenever you mention a file path (e.g. C:\\Users\\...\\file.docx or /home/user/file.pdf), "
+    "always format it as a Markdown link so the user can click to open it: "
+    "[filename.ext](C:\\full\\path\\to\\filename.ext). "
+    "Use the filename as the label and the full absolute path as the URL.\n"
+    "- Whenever you mention a web URL, format it as a Markdown link: [title](https://url).\n"
+    "- Never display raw paths or URLs as plain text — always wrap them in Markdown link syntax."
 )
 
 _CITATION_INSTRUCTION = (

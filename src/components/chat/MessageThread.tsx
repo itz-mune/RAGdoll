@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, ThumbsUp, ThumbsDown, ChevronDown, Check, FileText, FileSpreadsheet, Braces, FileCode, RotateCcw, ImageOff } from 'lucide-react';
+import { Copy, ThumbsUp, ThumbsDown, ChevronDown, Check, FileText, FileSpreadsheet, Braces, FileCode, RotateCcw, ImageOff, ExternalLink, FolderOpen } from 'lucide-react';
 import { ThinkingBlock } from '@/components/chat/ThinkingBlock';
 import { ImageLightbox } from '@/components/chat/ImageLightbox';
 import { ToolCallIndicator, SkillLoadingIndicator } from '@/components/chat/ToolCallIndicator';
@@ -18,6 +18,46 @@ import { FileOperationResult, parseFileOp } from '@/components/skills/FileOperat
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useChat } from '@/hooks/useChat';
+import { openUrl, openPath } from '@tauri-apps/plugin-opener';
+
+// ─── Link helpers ─────────────────────────────────────────────────────────────
+
+/** True when href points at a local file rather than a web URL. */
+function isLocalFilePath(href: string): boolean {
+  if (href.startsWith('file://')) return true;
+  if (/^[A-Za-z]:[/\\]/.test(href)) return true;            // Windows: C:\… or C:/…
+  if (href.startsWith('/') && !href.startsWith('//')) return true; // Unix absolute
+  return false;
+}
+
+/** Convert a file:// URL or raw Windows/Unix path to a plain filesystem path. */
+function resolveLocalPath(href: string): string {
+  if (href.startsWith('file:///')) {
+    const path = decodeURIComponent(href.slice(7)); // keeps leading /
+    // Windows: /C:/path → C:/path (strip leading slash before drive letter)
+    return /^\/[A-Za-z]:\//.test(path) ? path.slice(1) : path;
+  }
+  if (href.startsWith('file://')) {
+    return decodeURIComponent(href.slice(7));
+  }
+  return href;
+}
+
+async function handleLinkClick(
+  e: React.MouseEvent<HTMLAnchorElement>,
+  href: string,
+): Promise<void> {
+  e.preventDefault();
+  try {
+    if (isLocalFilePath(href)) {
+      await openPath(resolveLocalPath(href));
+    } else if (href.startsWith('http://') || href.startsWith('https://')) {
+      await openUrl(href);
+    }
+  } catch (err) {
+    console.error('[link] Failed to open:', href, err);
+  }
+}
 
 const SUGGESTED_PROMPTS = [
   'Summarize a document',
@@ -342,6 +382,29 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
+                // Links — web URLs open in system browser; local paths open with default app
+                a({ href, children }) {
+                  if (!href) return <span>{children}</span>;
+                  const local = isLocalFilePath(href);
+                  return (
+                    <a
+                      href={href}
+                      onClick={(e) => void handleLinkClick(e, href)}
+                      title={href}
+                      className={cn(
+                        'inline-flex items-center gap-0.5 underline underline-offset-2 cursor-pointer transition-colors',
+                        isUser
+                          ? 'text-primary-foreground/80 hover:text-primary-foreground'
+                          : 'text-blue-400 hover:text-blue-300',
+                      )}
+                    >
+                      {children}
+                      {local
+                        ? <FolderOpen className="inline h-3 w-3 shrink-0 opacity-60" />
+                        : <ExternalLink className="inline h-3 w-3 shrink-0 opacity-60" />}
+                    </a>
+                  );
+                },
                 // Inline image — styled thumbnail, opens lightbox on click
                 img({ src, alt }) {
                   return (
@@ -406,7 +469,28 @@ function MessageBubble({ message, onRegenerate }: { message: Message; onRegenera
         {/* "after marker" text (any text following each parsed marker block) */}
         {(opTextAfter || statsTextAfter || contentAfter) && !isUser && (
           <div className="prose prose-sm dark:prose-invert max-w-none mt-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a({ href, children }) {
+                  if (!href) return <span>{children}</span>;
+                  const local = isLocalFilePath(href);
+                  return (
+                    <a
+                      href={href}
+                      onClick={(e) => void handleLinkClick(e, href)}
+                      title={href}
+                      className="inline-flex items-center gap-0.5 text-blue-400 underline underline-offset-2 cursor-pointer transition-colors hover:text-blue-300"
+                    >
+                      {children}
+                      {local
+                        ? <FolderOpen className="inline h-3 w-3 shrink-0 opacity-60" />
+                        : <ExternalLink className="inline h-3 w-3 shrink-0 opacity-60" />}
+                    </a>
+                  );
+                },
+              }}
+            >
               {[opTextAfter, statsTextAfter, contentAfter].filter(Boolean).join('\n\n')}
             </ReactMarkdown>
           </div>
