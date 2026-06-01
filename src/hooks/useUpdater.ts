@@ -79,32 +79,27 @@ export function useUpdater(): UpdaterState {
 
   // ── Check ──────────────────────────────────────────────────────────────────
   const recheck = useCallback(async (): Promise<boolean> => {
-    try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const update = await check();
-      if (update?.available) {
-        setAvailable(true);
-        setRawUpdate(update);
-        setInfo({
-          version: update.version,
-          body:    update.body ?? null,
-          date:    update.date ?? null,
-        });
-        return true;
-      }
-      setAvailable(false);
-      setRawUpdate(null);
-      setInfo(null);
-      return false;
-    } catch (err) {
-      console.warn('[Updater] Check failed:', err);
-      return false;
+    const { check } = await import('@tauri-apps/plugin-updater');
+    const update = await check();
+    if (update?.available) {
+      setAvailable(true);
+      setRawUpdate(update);
+      setInfo({
+        version: update.version,
+        body:    update.body ?? null,
+        date:    update.date ?? null,
+      });
+      return true;
     }
+    setAvailable(false);
+    setRawUpdate(null);
+    setInfo(null);
+    return false;
   }, []);
 
   // Delay first check by 10 s to avoid competing with startup
   useEffect(() => {
-    const t = setTimeout(recheck, 10_000);
+    const t = setTimeout(() => recheck().catch((err) => console.warn('[Updater] Auto-check failed:', err)), 10_000);
     return () => clearTimeout(t);
   }, [recheck]);
 

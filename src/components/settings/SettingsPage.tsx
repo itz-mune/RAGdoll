@@ -648,6 +648,7 @@ function AboutSection() {
   const [checking, setChecking]     = useState(false);
   const [checkStatus, setCheckStatus] =
     useState<'idle' | 'up-to-date' | 'available' | 'error'>('idle');
+  const [checkError, setCheckError] = useState<string | null>(null);
   const [notesOpen, setNotesOpen]   = useState(false);
 
   // Reflect background-check result in status badge
@@ -658,11 +659,14 @@ function AboutSection() {
   const handleCheck = useCallback(async () => {
     setChecking(true);
     setCheckStatus('idle');
+    setCheckError(null);
     try {
       const found = await updater.recheck();
       setCheckStatus(found ? 'available' : 'up-to-date');
-    } catch {
+    } catch (err) {
+      console.error('[UpdateCheck]', err);
       setCheckStatus('error');
+      setCheckError(String(err));
     } finally {
       setChecking(false);
     }
@@ -730,8 +734,15 @@ function AboutSection() {
               </span>
             )}
             {checkStatus === 'error' && (
-              <span className="flex items-center gap-1 text-xs text-destructive">
-                <AlertCircle className="h-3.5 w-3.5" /> Update check failed
+              <span className="flex flex-col gap-0.5">
+                <span className="flex items-center gap-1 text-xs text-destructive">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" /> Update check failed
+                </span>
+                {checkError && (
+                  <span className="text-[10px] text-muted-foreground font-mono break-all max-w-xs">
+                    {checkError}
+                  </span>
+                )}
               </span>
             )}
           </div>
