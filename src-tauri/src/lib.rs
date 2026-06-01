@@ -180,7 +180,9 @@ fn do_spawn_sidecar(app_handle: &AppHandle) -> Option<Child> {
     py_cmd
         .arg(sidecar_src.join("main.py"))
         .current_dir(&sidecar_src)
-        .env("RAGDOLL_DATA_DIR", app_data.to_str()?);
+        .env("RAGDOLL_DATA_DIR", app_data.to_str()?)
+        // Pass uv path so plugins can install their own Python dependencies
+        .env("RAGDOLL_UV", uv.to_str().unwrap_or("uv"));
     #[cfg(target_os = "windows")]
     {
         py_cmd.creation_flags(CREATE_NO_WINDOW);

@@ -29,6 +29,7 @@ class PluginManifest:
     config_fields: list[dict] = field(default_factory=list)
     actions: list[dict] = field(default_factory=list)
     requires: list[str] = field(default_factory=list)   # plugin IDs this plugin depends on
+    dependencies: list[str] = field(default_factory=list)  # pip-style Python packages e.g. ["matplotlib>=3.9"]
 
     @classmethod
     def from_dict(cls, data: dict) -> "PluginManifest":
@@ -48,6 +49,7 @@ class PluginManifest:
             config_fields=data.get("config_fields", []),
             actions=data.get("actions", []),
             requires=data.get("requires", []),
+            dependencies=data.get("dependencies", []),
         )
 
 

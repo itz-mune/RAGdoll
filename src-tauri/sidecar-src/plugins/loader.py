@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
+import subprocess
+import sys
 import traceback
 from pathlib import Path
 
@@ -14,7 +17,6 @@ from .types import InstalledPlugin, PluginCategory, PluginManifest
 # ── Plugin directory ──────────────────────────────────────────────────────────
 
 def _plugins_dir() -> Path:
-    import os
     base = os.environ.get("RAGDOLL_DATA_DIR", str(Path(__file__).parent.parent.parent))
     d = Path(base) / "ragdoll_plugins"
     d.mkdir(parents=True, exist_ok=True)
@@ -27,6 +29,77 @@ def _preinstalled_ids() -> list[str]:
         return get_preinstalled_plugin_ids()
     except Exception:
         return []
+
+
+# ── Per-plugin Python dependency installation ─────────────────────────────────
+
+# Track which plugin IDs have already had their deps verified this session
+# so we don't re-run uv on every tool call.
+_deps_verified: set[str] = set()
+
+
+def _find_uv() -> str | None:
+    """Return the path to the uv binary, or None if not found.
+
+    Checks (in order):
+    1. RAGDOLL_UV env var — set by lib.rs when spawning the sidecar
+    2. System PATH
+    """
+    uv = os.environ.get("RAGDOLL_UV")
+    if uv and Path(uv).exists():
+        return uv
+    return shutil.which("uv") or shutil.which("uv.exe")
+
+
+def ensure_plugin_deps(plugin: InstalledPlugin) -> None:
+    """Install any Python packages declared in manifest.dependencies.
+
+    Uses ``uv pip install --python <current interpreter>`` which is near-instant
+    if the packages are already installed and only runs once per plugin per session.
+    """
+    if plugin.manifest.id in _deps_verified:
+        return
+    _deps_verified.add(plugin.manifest.id)  # mark early to avoid re-entry
+
+    deps = plugin.manifest.dependencies
+    if not deps:
+        return
+
+    uv = _find_uv()
+    if not uv:
+        print(
+            f"[Plugins] Warning: cannot install deps for '{plugin.manifest.id}' "
+            "— uv binary not found. Set RAGDOLL_UV or add uv to PATH.",
+            file=sys.stderr,
+        )
+        return
+
+    print(f"[Plugins] Installing/verifying deps for '{plugin.manifest.id}': {deps}")
+    try:
+        result = subprocess.run(
+            [uv, "pip", "install", "--python", sys.executable] + deps,
+            capture_output=True,
+            text=True,
+            timeout=180,   # 3 min max — first-time download
+        )
+        if result.returncode == 0:
+            print(f"[Plugins] Deps ready for '{plugin.manifest.id}'")
+        else:
+            print(
+                f"[Plugins] Dep install failed for '{plugin.manifest.id}':\n"
+                f"{result.stderr.strip()}",
+                file=sys.stderr,
+            )
+    except subprocess.TimeoutExpired:
+        print(
+            f"[Plugins] Dep install timed out for '{plugin.manifest.id}'",
+            file=sys.stderr,
+        )
+    except Exception as exc:
+        print(
+            f"[Plugins] Dep install error for '{plugin.manifest.id}': {exc}",
+            file=sys.stderr,
+        )
 
 
 # ── In-memory caches ──────────────────────────────────────────────────────────
@@ -89,6 +162,8 @@ def load_skill(plugin: InstalledPlugin):
     if not entry_path.exists():
         print(f"[Plugins] Skill entry not found: {entry_path}")
         return None
+    # Install any Python packages this plugin declared in manifest.dependencies
+    ensure_plugin_deps(plugin)
     try:
         module_name = f"ragdoll_plugin_{plugin.manifest.id.replace('-', '_')}"
         spec = importlib.util.spec_from_file_location(module_name, entry_path)
@@ -202,4 +277,6 @@ def install_plugin(plugin_id: str, files: list[dict]) -> None:
             target.write_bytes(content)
         else:
             target.write_text(str(content), encoding="utf-8")
+    # Reload so the new plugin appears; dep installation happens on first load_skill call
+    _deps_verified.discard(plugin_id)  # force re-check after fresh install
     load_all_plugins()
