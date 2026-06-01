@@ -28,6 +28,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "python-multipart>=0.0.28",
     "numpy>=2.4.4",
+    "matplotlib>=3.9.0",
     "pylance>=6.0.0",
     "ddgs>=0.6.0",
     "trafilatura>=2.0.0",
