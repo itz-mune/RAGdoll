@@ -58,7 +58,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI5QTJGRTk2QkYzRURDNjYKUldSbTNENi9sdjZpS1p2V3VLOE16THdScDFQU1ZUSFJRMmpielF2UFBrVnlqb1M2NlYrV3lMVGgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc0OEVFOTgyRTdFNjBDODYKUldTR0RPYm5ndW1PZEtXS0lvWEJpUHlzMmZLVXd1N09SZyt4YnRaaGdwaFJJYktXQ2k0RCt1NncK",
       "endpoints": [
         "https://github.com/itz-mune/RAGdoll/releases/latest/download/latest.json"
       ]

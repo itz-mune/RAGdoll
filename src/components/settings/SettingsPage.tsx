@@ -650,6 +650,15 @@ function AboutSection() {
     useState<'idle' | 'up-to-date' | 'available' | 'error'>('idle');
   const [checkError, setCheckError] = useState<string | null>(null);
   const [notesOpen, setNotesOpen]   = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+
+  // Read the actual version from the Tauri app bundle at runtime
+  useEffect(() => {
+    import('@tauri-apps/api/app')
+      .then(({ getVersion }) => getVersion())
+      .then(setAppVersion)
+      .catch(() => setAppVersion(__APP_VERSION__)); // fallback to build-time value
+  }, []);
 
   // Reflect background-check result in status badge
   useEffect(() => {
@@ -693,7 +702,7 @@ function AboutSection() {
           <div>
             <p className="font-semibold text-foreground">RAGdoll</p>
             <p className="text-xs text-muted-foreground">
-              Version {__APP_VERSION__} · built {__BUILD_DATE__} · Local-First RAG Intelligence
+              Version {appVersion ?? __APP_VERSION__} · built {__BUILD_DATE__} · Local-First RAG Intelligence
             </p>
           </div>
         </div>
