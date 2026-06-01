@@ -8,6 +8,7 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "updater:default",
     "store:allow-load",
     "store:allow-get",
     "store:allow-set",
