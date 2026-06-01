@@ -12,6 +12,22 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// Return the system PATH with any Tesseract-OCR entries removed.
+///
+/// Tesseract ships old versions of libgobject / libpango / libharfbuzz and
+/// adds its install directory to PATH.  When Python loads WeasyPrint those
+/// stale DLLs are found first, causing "Entry Point Not Found" pop-ups.
+/// Filtering them out before spawning our Python process avoids the conflict.
+#[cfg(target_os = "windows")]
+fn path_without_tesseract() -> String {
+    std::env::var("PATH")
+        .unwrap_or_default()
+        .split(';')
+        .filter(|seg| !seg.to_lowercase().contains("tesseract"))
+        .collect::<Vec<_>>()
+        .join(";")
+}
+
 // ── Managed state ─────────────────────────────────────────────────────────────
 
 struct SidecarHandle(Mutex<Option<Child>>);
@@ -138,7 +154,10 @@ fn do_spawn_sidecar(app_handle: &AppHandle) -> Option<Child> {
         .env("UV_PYTHON_INSTALL_DIR",   python_dir.to_str()?)
         .env("UV_NO_PROGRESS",          "1");
     #[cfg(target_os = "windows")]
-    sync_cmd.creation_flags(CREATE_NO_WINDOW);
+    {
+        sync_cmd.creation_flags(CREATE_NO_WINDOW);
+        sync_cmd.env("PATH", path_without_tesseract());
+    }
     let sync_ok = sync_cmd
         .status()
         .map(|s| s.success())
@@ -163,7 +182,10 @@ fn do_spawn_sidecar(app_handle: &AppHandle) -> Option<Child> {
         .current_dir(&sidecar_src)
         .env("RAGDOLL_DATA_DIR", app_data.to_str()?);
     #[cfg(target_os = "windows")]
-    py_cmd.creation_flags(CREATE_NO_WINDOW);
+    {
+        py_cmd.creation_flags(CREATE_NO_WINDOW);
+        py_cmd.env("PATH", path_without_tesseract());
+    }
     py_cmd
         .spawn()
         .inspect_err(|e| eprintln!("[RAGdoll] spawn failed: {e}"))
