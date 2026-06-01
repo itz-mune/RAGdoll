@@ -139,8 +139,6 @@ jobs:
           ls -la src-tauri/binaries/ || echo "MISSING: src-tauri/binaries/"
 
       # Decode the base64-encoded signing key into a real multiline env var.
-      # Storing the raw minisign key in a GitHub secret mangles newlines on
-      # Windows runners; base64 avoids the issue entirely.
       - name: Decode signing key
         shell: bash
         run: |
@@ -150,6 +148,17 @@ jobs:
           echo "RAGDOLL_KEY_EOF" >> "$GITHUB_ENV"
         env:
           TAURI_KEY_B64: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
+      - name: Verify signing key
+        shell: bash
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "ERROR: TAURI_SIGNING_PRIVATE_KEY is empty!"
+            exit 1
+          fi
+          echo "Key length: ${#TAURI_SIGNING_PRIVATE_KEY} chars"
+          echo "First line: $(echo "$TAURI_SIGNING_PRIVATE_KEY" | head -1)"
+          echo "Line count: $(echo "$TAURI_SIGNING_PRIVATE_KEY" | wc -l)"
 
       # ── Build & publish ───────────────────────────────────────────────────────
       - name: Build and publish Tauri app
